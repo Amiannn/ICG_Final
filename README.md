@@ -1,4 +1,4 @@
-# Pixel Bonsai Team Project
+# Pixel Bonsai (棒賽) Team Project
 
 Clean implementation folder for the final presentation.
 
