@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixel Bonsai Team Project</title>
+  <style>
+    body{font-family:Calibri,"Microsoft JhengHei",sans-serif;margin:48px;line-height:1.6;color:#202020;background:#fff;}
+    h1{font-size:34px;margin-bottom:6px;}
+    h2{margin-top:34px;}
+    a{color:#7b2945;font-weight:700;}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px;}
+    .card{border:1px solid #bbb;padding:18px;background:#faf7f8;}
+    code{background:#f0ecee;padding:2px 5px;}
+  </style>
+</head>
+<body>
+  <h1>Pixel Bonsai Team Project</h1>
+  <p>Clean collaboration project for the final ICG demo.</p>
+  <p><a href="01_webgl_tree/index.html">Open WebGL Tree Demo</a></p>
+  <div class="grid">
+    <div class="card"><h2>01 WebGL Tree</h2><p>Real-time interaction, tree growth, seasons.</p></div>
+    <div class="card"><h2>02 Ray Tracing</h2><p>Ray-traced rendering of the same voxel tree state.</p></div>
+    <div class="card"><h2>03 Morphing</h2><p>Smooth growth, season, and shape transitions.</p></div>
+  </div>
+  <h2>Shared Contract</h2>
+  <p>All blocks coordinate through <code>shared/tree_state.json</code>.</p>
+</body>
+</html>
