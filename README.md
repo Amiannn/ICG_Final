@@ -2,6 +2,9 @@
 
 Clean implementation folder for the final presentation.
 
+
+https://github.com/user-attachments/assets/42b2c161-8b86-4696-8b52-09182ad42f26
+
 ## Project Idea
 
 Pixel Bonsai is a 3D voxel tree that grows, changes season, and can be rendered in two ways:
