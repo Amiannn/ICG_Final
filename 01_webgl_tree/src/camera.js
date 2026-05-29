@@ -1,82 +1,105 @@
-// Auto-fit orbit camera.
+import * as THREE from "three";
+
+// Pixel-perfect orthographic camera.
 //
-// Holds the tree's bounding box and computes a camera distance such that the
-// projected box fits inside the rectangular viewport with a small margin.
-// Smooth-damps `currentDistance` and `currentTarget` toward their goals so
-// the camera glides instead of jumping when the tree grows.
+// Moving an ortho camera through a low-res scene makes pixels swim and creep.
+// The fix (from the article) is two-stage:
+//   1. Snap the camera to a view-aligned, texel-sized grid -> kills creep, but
+//      motion becomes steppy.
+//   2. Record the snap error and shift the final upscaled image back by that
+//      sub-pixel amount in screen space -> motion is smooth again.
+//
+// This class owns stage 1 and exposes the snap error (in texels) for the
+// pipeline's final pass to apply stage 2.
 
-function Camera(canvas) {
-    this.fovY = 22 * Math.PI / 180;     // narrow FOV → compressed perspective
-    this.aspect = canvas.width / canvas.height;
-    this.near = 1;
-    this.far = 800;
+export class PixelCamera {
+  constructor() {
+    this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
+    this.viewHeight = 24.5; // world units visible vertically (fits the big cedar)
+    this.target = new THREE.Vector3(1.8, 8.2, 1.0);
+    // Fixed iso offset from target to eye. Drift moves the target and keeps this
+    // constant, so the *orientation* never changes -- texel-snapping can only
+    // smooth translation, not rotation, so an orbiting camera always swims.
+    this.eyeOffset = new THREE.Vector3(13, 10, 13);
+    this.desiredTarget = this.target.clone();
+    this.desiredPosition = this.target.clone().add(this.eyeOffset);
 
-    this.azimuth = 0.4;        // radians around Y — slight 3-quarter view
-    this.elevation = 0.06;     // very low tilt — looking up at the trunk a bit
-    this.azimuthRate = 0.02;   // gentle slow orbit
+    this.snapEnabled = true;
+    this.resolutionY = 270;
 
-    this.currentTarget = [0, 10, 0];
-    this.currentDistance = 80;
-    this.goalTarget = [0, 10, 0];
-    this.goalDistance = 80;
+    this.snapError = new THREE.Vector2(); // texels, fed to final composite
 
-    this.smooth = 1.8; // higher = snappier
-}
+    this._right = new THREE.Vector3();
+    this._up = new THREE.Vector3();
+    this._fwd = new THREE.Vector3();
+    this._snapped = new THREE.Vector3();
+  }
 
-Camera.prototype.fit = function (bbox, margin) {
-    margin = margin || 1.15;
-    var cx = (bbox.min[0] + bbox.max[0]) * 0.5;
-    var cy = (bbox.min[1] + bbox.max[1]) * 0.5;
-    var cz = (bbox.min[2] + bbox.max[2]) * 0.5;
+  setAspect(aspect) {
+    const halfH = this.viewHeight * 0.5;
+    const halfW = halfH * aspect;
+    this.camera.left = -halfW;
+    this.camera.right = halfW;
+    this.camera.top = halfH;
+    this.camera.bottom = -halfH;
+    this.camera.updateProjectionMatrix();
+  }
 
-    var sizeY = (bbox.max[1] - bbox.min[1]);
-    var sizeX = (bbox.max[0] - bbox.min[0]);
-    var sizeZ = (bbox.max[2] - bbox.min[2]);
-    // Use the larger of width/height projection requirement.
-    var halfH = sizeY * 0.5 * margin;
-    var halfW = Math.max(sizeX, sizeZ) * 0.5 * margin;
+  // world size of one screen texel along the camera's up axis
+  texelWorldSize() {
+    return (this.camera.top - this.camera.bottom) / this.resolutionY;
+  }
 
-    var distH = halfH / Math.tan(this.fovY * 0.5);
-    var distW = halfW / (Math.tan(this.fovY * 0.5) * this.aspect);
-    var dist = Math.max(distH, distW, 30);
+  // Gentle orbital drift so the snapping/jitter behaviour is visible.
+  drift(time) {
+    // Gentle pan around the cedar; the eye follows at a fixed offset so the
+    // viewing angle stays locked (pure translation, which snaps cleanly).
+    this.desiredTarget.set(
+      1.8 + Math.sin(time * 0.16) * 1.5,
+      8.2,
+      1.0 + Math.cos(time * 0.12) * 1.2,
+    );
+    this.desiredPosition.copy(this.desiredTarget).add(this.eyeOffset);
+  }
 
-    this.goalTarget = [cx, cy, cz];
-    this.goalDistance = dist;
-};
+  update() {
+    const cam = this.camera;
+    cam.position.copy(this.desiredPosition);
+    cam.lookAt(this.desiredTarget);
+    cam.updateMatrixWorld();
 
-Camera.prototype.update = function (dt) {
-    // smooth-damp distance + target
-    var k = 1 - Math.exp(-this.smooth * dt);
-    for (var i = 0; i < 3; i++) {
-        this.currentTarget[i] += (this.goalTarget[i] - this.currentTarget[i]) * k;
+    if (!this.snapEnabled) {
+      this.snapError.set(0, 0);
+      return;
     }
-    this.currentDistance += (this.goalDistance - this.currentDistance) * k;
 
-    // gentle orbit
-    this.azimuth += this.azimuthRate * dt;
-};
+    // Camera basis vectors in world space.
+    cam.matrixWorld.extractBasis(this._right, this._up, this._fwd);
 
-Camera.prototype.eye = function () {
-    var d = this.currentDistance;
-    var ce = Math.cos(this.elevation);
-    var se = Math.sin(this.elevation);
-    var ca = Math.cos(this.azimuth);
-    var sa = Math.sin(this.azimuth);
-    return [
-        this.currentTarget[0] + d * ce * sa,
-        this.currentTarget[1] + d * se,
-        this.currentTarget[2] + d * ce * ca
-    ];
-};
+    const texel = this.texelWorldSize();
+    const base = this.desiredPosition;
+    const rDist = base.dot(this._right);
+    const uDist = base.dot(this._up);
+    const rSnap = Math.round(rDist / texel) * texel;
+    const uSnap = Math.round(uDist / texel) * texel;
+    const rErr = rDist - rSnap;
+    const uErr = uDist - uSnap;
 
-Camera.prototype.viewMatrix = function (out) {
-    var eye = this.eye();
-    mat4.identity(out);
-    mat4.lookAt(eye, this.currentTarget, [0, 1, 0], out);
-    return out;
-};
+    // Shift both eye and target by the same vector so the view direction is
+    // preserved while the eye lands on the texel grid.
+    this._snapped
+      .copy(base)
+      .addScaledVector(this._right, -rErr)
+      .addScaledVector(this._up, -uErr);
+    cam.position.copy(this._snapped);
+    cam.lookAt(
+      this.desiredTarget.x - rErr * this._right.x - uErr * this._up.x,
+      this.desiredTarget.y - rErr * this._right.y - uErr * this._up.y,
+      this.desiredTarget.z - rErr * this._right.z - uErr * this._up.z,
+    );
+    cam.updateMatrixWorld();
 
-Camera.prototype.projMatrix = function (out) {
-    mat4.perspective(this.fovY * 180 / Math.PI, this.aspect, this.near, this.far, out);
-    return out;
-};
+    // Snap error expressed in texels, for the sub-pixel screen-space shift.
+    this.snapError.set(rErr / texel, uErr / texel);
+  }
+}

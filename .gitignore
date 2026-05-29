@@ -1,6 +1,14 @@
+# node / vite
+node_modules/
+dist/
+.vite/
+
+# python (for ray tracing / morphing tools)
 __pycache__/
 *.py[cod]
-.DS_Store
-.env
 .venv/
-node_modules/
+.env
+
+# os / editor
+.DS_Store
+*.log

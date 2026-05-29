@@ -1,50 +1,72 @@
-# Pixel Bonsai (棒賽) Team Project
+# Pixel Bonsai
 
-Clean implementation folder for the final presentation.
+A 3D pixel-art bonsai scene rendered in real time with Three.js. A large layered
+cedar sits in a hand-styled meadow with a reflective pond, drifting cloud
+shadows, volumetric god rays, and floating dust motes — all rendered through a
+low-resolution, cel-shaded, outline pipeline for a clean pixel-art look.
 
+The rendering style is inspired by David Holland's write-up on 3D pixel art
+rendering (<https://www.davidhol.land/articles/3d-pixel-art-rendering/>); every
+technique here is an independent Three.js implementation.
 
-https://github.com/user-attachments/assets/42b2c161-8b86-4696-8b52-09182ad42f26
+![Pixel Bonsai — day](docs/screenshots/day.png)
 
-## Project Idea
+| Daytime drift | Night mode |
+| --- | --- |
+| ![day](docs/screenshots/day2.png) | ![night](docs/screenshots/night.png) |
 
-Pixel Bonsai is a 3D voxel tree that grows, changes season, and can be rendered in two ways:
+## Project structure
 
-1. **WebGL mode**: real-time interaction, growth, camera, season controls.
-2. **Ray tracing mode**: render the same voxel tree state with higher-quality lighting.
-3. **Morphing mode**: generate smooth transitions between growth / season / shape states.
-
-This matches the PPT direction: the tree is not just next to ray tracing. The same voxel tree is the target of both renderers.
-
-## Folder Split
-
-```text
-pixel_bonsai_team_project/
-├── 01_webgl_tree/      # real-time WebGL tree app
-├── 02_ray_tracing/     # ray tracing on the same voxel tree
-├── 03_morphing/        # growth / season / shape transition tools
-├── shared/             # shared tree state contract
-├── outputs/            # generated outputs
-└── docs/               # workflow and presentation notes
-```
-
-## Quick Start
-
-Open the WebGL demo:
+This is a team project. The real-time WebGL tree is the shared subject; the two
+other folders build on the same tree for different goals.
 
 ```text
-01_webgl_tree/index.html
+ICG_Final/
+├── 01_webgl_tree/    # real-time WebGL Pixel Bonsai (Three.js + Vite) — the base
+├── 02_tree_growth/   # growth morphing: small sapling -> full tree (teammate)
+├── 03_ray_tracing/   # ray-traced lighting of the same tree (teammate)
+└── docs/             # screenshots and notes
 ```
 
-Render the shared voxel tree with ray tracing:
+## Quick start (WebGL tree)
 
 ```bash
-cd 02_ray_tracing
-python3 render_voxel_tree.py ../shared/tree_state.json ../outputs/ray_traced/sample_tree.png
+cd 01_webgl_tree
+npm install
+npm run dev        # open http://localhost:5173
 ```
 
-Generate morphed tree states:
+Build a static bundle with `npm run build` (output in `01_webgl_tree/dist/`).
 
-```bash
-cd 03_morphing
-python3 morph_tree_state.py ../shared/tree_state.json ../shared/tree_state_autumn.json --season autumn --t 1.0
-```
+## What's in the renderer
+
+The whole scene is drawn into a small render target (default 300px tall) and
+upscaled with nearest-neighbour sampling, so everything reads as crisp pixels.
+
+- **Low-res pipeline** — color + depth + view-normal targets, then post passes,
+  then a nearest upscale to the canvas.
+- **Pixel-perfect camera** — the camera snaps to a view-aligned texel grid and
+  the final image is shifted back by the sub-pixel snap error, so panning stays
+  smooth instead of swimming.
+- **Cel shading + cloud shadows** — toon gradient ramp; a scrolling noise texture
+  is injected into every material as soft cloud shadows.
+- **Outlines** — depth/normal edge detection (4-tap kernel) for single-pixel
+  outlines with warm highlights on convex, light-facing edges.
+- **Planar-reflection water** — a mirrored camera renders reflections; animated
+  wave lines and a soft, organic shoreline.
+- **Volumetric god rays** — screen-space light shafts that fan from the sun and
+  are occluded by the tree and terrain.
+- **Dust motes** — additive world-space particles drifting in the air for depth.
+- **2D touches** — animated rain, film grain, vignette, and a night colour grade.
+
+## Controls
+
+The on-screen panel toggles every effect and lets you change the vertical
+resolution and outline strength live:
+
+`Camera drift` · `Texel snap` · `Outlines` · `Cloud shadows` · `Water reflect`
+· `God rays` · `Dust motes` · `Rain` · `Night` · `Film grain`
+
+The cedar (trunk, root system, and layered foliage skirts) is generated
+procedurally in [`01_webgl_tree/src/scene/tree.js`](01_webgl_tree/src/scene/tree.js)
+and is parameterised by a single scale factor — useful for the growth work.

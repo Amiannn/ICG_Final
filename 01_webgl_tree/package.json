@@ -1,0 +1,18 @@
+{
+  "name": "pixel-bonsai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "3D pixel art rendering in Three.js, recreating the techniques from davidhol.land/articles/3d-pixel-art-rendering",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "three": "^0.171.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  }
+}
