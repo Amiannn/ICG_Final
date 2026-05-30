@@ -2,8 +2,17 @@ import { settings } from "./config.js";
 
 // Wires the control panel to the settings object. `onChange(key)` is called
 // whenever a flag/slider changes so the main loop can react (e.g. resize on
-// resolution change, swap day/night).
-export function initUI(onChange) {
+// resolution change, swap day/night). `onModeChange(name)` is called when the
+// user clicks a top-level mode button (Real-time / Growth / Path Trace).
+export function initUI(onChange, onModeChange) {
+  document.querySelectorAll(".mode").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = btn.dataset.mode;
+      document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("active", b === btn));
+      onModeChange?.(name);
+    });
+  });
+
   document.querySelectorAll(".toggle").forEach((btn) => {
     const flag = btn.dataset.flag;
     btn.classList.toggle("active", !!settings[flag]);

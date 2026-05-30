@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import { settings, palette } from "./config.js";
-import { cloudUniforms } from "./materials.js";
 import { PixelCamera } from "./camera.js";
 import { Lighting } from "./lighting.js";
 import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
+import { realtimeMode } from "./modes/realtime.js";
+import { growthMode } from "./modes/growth_stub.js";
+import { raytraceMode } from "../../03_ray_tracing/src/raytrace_mode.js";
 
 const canvas = document.querySelector("#scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
@@ -26,7 +28,26 @@ const dust = new DustParticles();
 scene.add(dust.points);
 const pipeline = new Pipeline(renderer, pixel);
 
-initUI(onSettingChange);
+// Shared context passed to every mode plugin (see CONTRIBUTING.md §5).
+const ctx = {
+  renderer,
+  scene,
+  camera: pixel,
+  pixel,
+  sun: lighting.sun,
+  lighting,
+  tree: world.tree,
+  world,
+  dust,
+  pipeline,
+  settings,
+};
+
+const modes = { realtime: realtimeMode, growth: growthMode, raytrace: raytraceMode };
+let currentMode = realtimeMode;
+currentMode.init(ctx);
+
+initUI(onSettingChange, switchMode);
 applyAllSettings();
 
 window.addEventListener("resize", resize);
@@ -37,29 +58,17 @@ renderer.setAnimationLoop(render);
 
 function render() {
   const time = clock.getElapsedTime();
-
-  if (settings.motion) pixel.drift(time);
-  pixel.snapEnabled = settings.snap;
-  pixel.resolutionY = settings.verticalResolution;
-  pixel.update();
-
-  // scrolling cloud shadows
-  cloudUniforms.uCloudTime.value = time * 0.015;
-  cloudUniforms.uCloudStrength.value = settings.clouds ? 1 : 0;
-
-  // sun aims at scene centre regardless of camera drift
-  lighting.sun.target.position.set(0, 0, 0);
-  lighting.sun.target.updateMatrixWorld();
-
-  world.water.setTime(time);
-  world.water.material.uniforms.uReflectEnabled.value = settings.water ? 1 : 0;
-  dust.setTime(time);
-
-  pipeline.render(scene, lighting.sun, time, (r, cam) => {
-    world.water.updateReflection(r, cam, scene);
-  });
-
+  currentMode.render(ctx, time);
   tickFps();
+}
+
+function switchMode(name) {
+  const next = modes[name];
+  if (!next || next === currentMode) return;
+  currentMode.dispose(ctx);
+  currentMode = next;
+  resize();
+  next.init(ctx);
 }
 
 function resize() {

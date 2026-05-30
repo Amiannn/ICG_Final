@@ -81,6 +81,35 @@ input[type="range"] {
   gap: 6px;
 }
 
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.mode {
+  font: inherit;
+  font-size: 11px;
+  padding: 8px 6px;
+  color: #9fb3b6;
+  background: rgba(40, 52, 60, 0.6);
+  border: 1px solid rgba(120, 160, 170, 0.16);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.mode:hover {
+  border-color: rgba(255, 200, 120, 0.4);
+}
+
+.mode.active {
+  color: #0c1014;
+  background: #ffcc7a;
+  border-color: #ffcc7a;
+  font-weight: 600;
+}
+
 .toggle {
   font: inherit;
   font-size: 11px;

@@ -20,6 +20,9 @@ technique here is an independent Three.js implementation.
 This is a team project. The real-time WebGL tree is the shared subject; the two
 other folders build on the same tree for different goals.
 
+For team development conventions (mode plugin contract, shared `ctx`, tree API,
+git/ownership rules) see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ```text
 ICG_Final/
 ├── 01_webgl_tree/    # real-time WebGL Pixel Bonsai (Three.js + Vite) — the base
