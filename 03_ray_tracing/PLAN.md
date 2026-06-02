@@ -294,3 +294,104 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 ### 既有研究文件
 - [`../../term pj/python_raytracer/docs/SIGGRAPH_RESEARCH.md`](../../term%20pj/python_raytracer/docs/SIGGRAPH_RESEARCH.md) — Whitted tracer 角度的研究調查
 - [`../../term pj/python_raytracer/docs/OPTIMIZATIONS.md`](../../term%20pj/python_raytracer/docs/OPTIMIZATIONS.md) — 已落地的 4 個 SIGGRAPH-era 優化
+
+---
+
+## 九、目前進度與接續指南（2026-06-02 更新）
+
+> 開發分支：**`feat/ray-tracing`**（從 main 開出，所有 RT showcase 工作在此 commit，
+> 最後由隊員合併回 main）。在別台電腦接續前先 `git checkout feat/ray-tracing && git pull`。
+
+### 9.1 已完成（含 PLAN 原清單對應）
+
+| 項目 | 狀態 | 檔案 |
+|---|---|---|
+| 1-3 path tracer + pixel-art post + mode 架構 | ✅ | `raytrace_mode.js` / `post_pixelart.js` / `01/src/main.js` |
+| 4 grass/foliage merge 成 static geometry | ✅ | `merge_instances.js` |
+| IBL gradient env（補被丟掉的 HemisphereLight，B4） | ✅ | `raytrace_mode.js`（`GradientEquirectTexture`, `ENV_INTENSITY=1.0`） |
+| Windows/multi-GPU 修復（BVH worker、DoubleSide、dispose bug） | ✅ | commit `98d3801` |
+| 樹葉 NaN 崩潰修復（top skirt `shelfR(1)=0` → `0/0`） | ✅ | `01/src/scene/tree.js`、`merge_instances.js`（non-finite 實例 fail-soft 跳過） |
+| cel ramp 最暗 band 不再壓成純黑（lifted shadow floor 0.22） | ✅ | `post_pixelart.js`（`CEL_SHADOW_FLOOR`） |
+| 樹葉著色法線改朝世界上方（對齊即時 billboard 打光） | ✅ | `merge_instances.js` |
+| **8 葉片半透明（Habel 2007 近似）** | ✅ 初版 | `merge_instances.js`（foliage 用 `MeshPhysicalMaterial` transmission 0.6 / thickness 0.4 / 綠色 attenuation；grass 維持不透明） |
+| 樹冠覆蓋率（2→3 quad asterisk + 1.4x，補滿葉縫看穿問題） | ✅ | `merge_instances.js`（`FOLIAGE_FRAMES`） |
+
+**目前 demo 視覺狀態**：樹冠已是完整針葉樹形（不再稀疏看穿到樹幹），但整體仍偏暗、
+偏去飽和的深綠。亮度/飽和度微調尚未做。
+
+### 9.2 待完成（接續工作，依優先序）
+
+1. **樹葉亮度/顏色微調**（半小時，純調參，先做）
+   - 方向：提高 foliage 的 albedo 或降低 transmission 讓綠色更跳；或在 `post_pixelart.js`
+     的 COMP grade 對綠色不要過度去飽和（目前 `color = mix(vec3(luma), color, 0.88)` 會吃掉飽和度）。
+   - 也可微調 `ENV_INTENSITY` 與 attenuationColor。**這是純參數,要在沙箱逐張比對(見 9.3)。**
+
+2. **PLAN 項目 6 — Hashed Alpha Testing（Wyman & McGuire 2017）**（半天）
+   - 目前 foliage 用硬 `alphaTest: 0.5`,葉緣鋸齒、且 path tracer 不做 stochastic。
+   - 作法 A（path tracer 端）：把 foliage 材質改 `transparent: true` + 用貼圖 alpha,
+     讓 tracer 走 stochastic transparency（多 sample 累積→柔邊、視覺更滿）。需確認與
+     transmission 並存的行為。
+   - 作法 B（即時端,對應原 PLAN 的 `alpha_leaf.js`）：在 real-time billboard shader
+     注入 hash(worldPos) 比對 alpha。兩端可分別做,報告各放一張。
+
+3. **PLAN 項目 5 — OIDN 降噪**（1 天,效能/畫面最大加成）
+   - 套件：[DennisSmolek/Denoiser](https://github.com/DennisSmolek/Denoiser)（tfjs WebGL backend，首選）。
+   - 需從 path tracer 拉 albedo + normal AOV（`raytrace_mode` 已有 normal prepass 可重用,
+     albedo 要另接）。在 `post_pixelart` 之**前**插一層 denoise。目標：4 spp ≈ 32 spp。
+
+4. **PLAN 項目 7 — Sobol / stratified sampling**（1 小時）
+   - 確認 three-gpu-pathtracer 的 `FEATURE_SOBOL` / `RANDOM_TYPE` 是否預設開;若否在
+     `raytrace_mode` 設定。對應 term pj 的 Owen-scrambled Sobol。
+
+5. **PLAN 項目 9 — 寫實 hero shot 對照**（1 小時）
+   - `raytrace_mode` 加一個開關 bypass `post_pixelart`（或 cel/outline pass 設 0）,
+     直接輸出 path tracer 的 ACES tonemap 結果。報告放 real-time / pixel-art PT /
+     photoreal PT 三張對照。
+
+6. **（選）8 葉片半透明精修**：目前是 transmission 近似,可評估是否用更貼近 Habel 的
+   雙面 thin-translucency,或調 thickness/attenuationDistance 讓背光更明顯。
+
+### 9.3 開發/驗證須知（踩過的雷,務必先讀）
+
+**A. 在自動化/headless 瀏覽器裡 path tracer 會卡在 0 spp(但互動式 Chrome 正常)**
+- 原因:headless 的 GPU process 裡 `KHR_parallel_shader_compile` 的完成狀態永遠不翻 true,
+  導致 `WebGLPathTracer` 的 `isCompiling` 永遠是 true、`pathTracer.update()` 每幀被跳過。
+- 驗證用 workaround:在頁面注入隱藏該擴充(讓 three 的 `compileAsync` 同步 resolve):
+  ```js
+  // puppeteer: page.evaluateOnNewDocument(...)
+  for (const proto of [WebGL2RenderingContext, WebGLRenderingContext]) {
+    const orig = proto.prototype.getExtension;
+    proto.prototype.getExtension = function (n) {
+      return n === "KHR_parallel_shader_compile" ? null : orig.call(this, n);
+    };
+  }
+  ```
+- **這是測試專用、不要寫進 app 程式碼**。真機不需要。
+
+**B. 不要在專案內 `npm install` 臨時測試套件**
+- 改動 `01_webgl_tree/package-lock.json` 會觸發 Vite 重新 optimize deps,中斷時會留下
+  半寫的 `node_modules/.vite/deps_temp_*`,導致 BVH worker 載入失敗:
+  `Uncaught Error: GenerateMeshBVHWorker: undefined`(worker 模組 load error,訊息為 undefined)。
+- 解法:刪 `01_webgl_tree/node_modules/.vite` 後重啟 dev server、hard reload。
+- 測試瀏覽器(puppeteer)請裝在**專案外的獨立資料夾**(見 C)。
+
+**C. 沙箱截圖驗證流程(每改一步自己截圖比對)**
+- 在專案外建獨立 puppeteer 環境,避免污染專案 lockfile:
+  ```bash
+  mkdir -p ~/pptr-sandbox && cd ~/pptr-sandbox
+  npm init -y && npm i puppeteer-core@23
+  ```
+- 啟動 dev server:`cd 01_webgl_tree && npm run dev`(注意實際 port,常被佔用而跳 5174/5175)。
+- 截圖腳本要點:headful + 反節流 flags(`--disable-renderer-backgrounding` 等)+ 上面 A 的
+  擴充隱藏 + 點 `.mode[data-mode="raytrace"]` + 輪詢 `#pt-hud` 的 spp 到 ~48 + 截圖。
+  收斂約 10-15 秒(transmission 會稍慢)。
+- 指向正確的 `http://localhost:<port>/`。
+
+### 9.4 關鍵檔案地圖
+- `03_ray_tracing/src/raytrace_mode.js` — mode plugin:hide instanced/points/water →
+  merge billboards(foliage `translucent:true`,grass `false`)→ 換 MeshStandardMaterial →
+  IBL env → perspective cam → `WebGLPathTracer` + BVH worker → 每 frame `renderSample` + post。
+- `03_ray_tracing/src/merge_instances.js` — billboard→static crossed-quad 烘焙;`FRAMES`(grass 2 quad)
+  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk + 1.4x);foliage 走 `MeshPhysicalMaterial` 半透明。
+- `03_ray_tracing/src/post_pixelart.js` — cel ramp(含 `CEL_SHADOW_FLOOR`)+ outline + low-res upscale。
+- `01_webgl_tree/src/scene/tree.js` — 樹幾何;foliage instance 生成(droop 已修 `R>0` 防 NaN)。
