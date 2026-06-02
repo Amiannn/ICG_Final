@@ -91,7 +91,11 @@ export const raytraceMode = {
     //     inherits the same world transform.
     for (const obj of _state.hidden) {
       if (!obj.isInstancedMesh || !obj.material || !obj.material.map || !obj.parent) continue;
-      const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS });
+      // Tree foliage gets leaf translucency (transmission) + the denser 3-quad
+      // asterisk; the ground grass stays opaque so the 18k-blade canopy doesn't
+      // slow convergence.
+      const translucent = obj !== world.grass;
+      const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, translucent });
       obj.parent.add(mesh);
       _state.merged.push({ mesh, parent: obj.parent });
     }

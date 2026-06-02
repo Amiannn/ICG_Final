@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tree Image Morphing — Beier–Neely</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #eef3ec;
+    font-family: ui-sans-serif, system-ui, "Noto Sans TC", sans-serif; color: #36443b;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 22px;
+  }
+  h1 { font-size: 18px; font-weight: 700; margin: 4px 0 0; letter-spacing: .02em; }
+  .sub { font-size: 13px; opacity: .7; margin: 0; }
+  .row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .panel { background: #fff; border-radius: 12px; padding: 10px; box-shadow: 0 4px 18px rgba(40,60,45,.1); }
+  .panel h2 { font-size: 12px; margin: 2px 0 8px; text-align: center; font-weight: 600; opacity:.75; }
+  canvas { display: block; border-radius: 8px; image-rendering: auto; }
+  #out { box-shadow: 0 6px 26px rgba(40,60,45,.18); border-radius: 10px; }
+  #ui {
+    display: flex; align-items: center; gap: 14px; background: #fff; padding: 12px 18px;
+    border-radius: 12px; box-shadow: 0 4px 18px rgba(40,60,45,.1); font-size: 13px;
+  }
+  #t { width: 260px; accent-color: #5b8a3f; }
+  .val { font-variant-numeric: tabular-nums; min-width: 3.5ch; color:#4a7634; font-weight:600; }
+  button { border:none; border-radius:9px; padding:7px 14px; cursor:pointer; background:#5b8a3f; color:#fff; font-weight:600; }
+  button:hover{ background:#4a7634; }
+  label.ck { display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+</style>
+</head>
+<body>
+  <h1>Tree Image Morphing — Beier–Neely Feature-Based Metamorphosis</h1>
+  <p class="sub">Warp two tree images toward interpolated feature lines, then cross-dissolve (Beier & Neely, SIGGRAPH 1992). Ping-pong A→B→A.</p>
+
+  <div class="row">
+    <div class="panel"><h2>A — sapling (source)</h2><canvas id="srcA" width="300" height="300"></canvas></div>
+    <div class="panel"><h2>morph (t)</h2><canvas id="out" width="300" height="300"></canvas></div>
+    <div class="panel"><h2>B — mature tree (target)</h2><canvas id="srcB" width="300" height="300"></canvas></div>
+  </div>
+
+  <div id="ui">
+    <button id="play">⏸ 暫停</button>
+    <b>t</b>
+    <input id="t" type="range" min="0" max="1" step="0.001" value="0" />
+    <span class="val" id="tv">0.00</span>
+    <label class="ck"><input type="checkbox" id="showLines" checked /> 顯示 feature lines</label>
+  </div>
+
+<script>
+"use strict";
+const W = 300, H = 300;
+const NF = 22;                 // precomputed morph frames
+
+// ---- feature lines, as fractions of (W,H) (y is DOWN, canvas convention) ----
+// each entry: { a:[sx,sy,ex,ey] on sapling, b:[...] on mature } — corresponding.
+const LINES = [
+  { a: [0.25, 0.88, 0.75, 0.88], b: [0.25, 0.88, 0.75, 0.88] }, // ground (fixed)
+  { a: [0.50, 0.88, 0.50, 0.56], b: [0.50, 0.88, 0.50, 0.50] }, // stem → trunk (taller)
+  { a: [0.50, 0.57, 0.40, 0.50], b: [0.50, 0.52, 0.24, 0.34] }, // left leaf → left canopy
+  { a: [0.50, 0.57, 0.60, 0.50], b: [0.50, 0.52, 0.76, 0.34] }, // right leaf → right canopy
+  { a: [0.50, 0.55, 0.50, 0.47], b: [0.50, 0.50, 0.50, 0.12] }, // tip → canopy top (tall)
+  { a: [0.42, 0.54, 0.58, 0.54], b: [0.22, 0.34, 0.78, 0.34] }, // narrow → wide canopy
+];
+const px = (l) => [l[0]*W, l[1]*H, l[2]*W, l[3]*H];
+
+// ---- draw the two source tree images (flat-vector, project style) ----------
+function bg(ctx){ ctx.fillStyle = "#f4f8f2"; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = "#dfeAD6"; ctx.fillStyle="#e2eedd"; ctx.beginPath();
+  ctx.ellipse(W*0.5, H*0.9, W*0.42, H*0.05, 0, 0, 7); ctx.fill(); }
+
+function drawSapling(ctx){
+  bg(ctx);
+  // seed
+  ctx.fillStyle="#5a3a22"; ctx.beginPath(); ctx.ellipse(W*0.5,H*0.865,W*0.035,H*0.022,0,0,7); ctx.fill();
+  // green stem
+  ctx.strokeStyle="#6f9a4e"; ctx.lineWidth=W*0.022; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(W*0.5,H*0.87); ctx.lineTo(W*0.5,H*0.56); ctx.stroke();
+  // two cotyledon leaves
+  ctx.fillStyle="#86b657";
+  for(const s of [-1,1]){ ctx.save(); ctx.translate(W*0.5,H*0.565); ctx.rotate(s*0.7);
+    ctx.beginPath(); ctx.ellipse(s*W*0.05,-H*0.02,W*0.07,H*0.032,0,0,7); ctx.fill(); ctx.restore(); }
+}
+
+function drawMature(ctx){
+  bg(ctx);
+  // tapered brown trunk
+  ctx.fillStyle="#7d5638"; ctx.beginPath();
+  ctx.moveTo(W*0.44,H*0.88); ctx.quadraticCurveTo(W*0.47,H*0.66,W*0.485,H*0.46);
+  ctx.lineTo(W*0.515,H*0.46); ctx.quadraticCurveTo(W*0.53,H*0.66,W*0.56,H*0.88); ctx.closePath(); ctx.fill();
+  // a couple of branches
+  ctx.strokeStyle="#5e3f28"; ctx.lineWidth=W*0.02; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(W*0.5,H*0.55); ctx.lineTo(W*0.4,H*0.44); ctx.moveTo(W*0.5,H*0.6); ctx.lineTo(W*0.62,H*0.47); ctx.stroke();
+  // layered green canopy (circle cluster)
+  const blobs=[[0.5,0.3,0.2],[0.34,0.36,0.15],[0.66,0.36,0.15],[0.42,0.22,0.13],[0.6,0.22,0.13],[0.5,0.16,0.12],[0.28,0.3,0.1],[0.72,0.3,0.1]];
+  ctx.fillStyle="#4a7a39"; for(const [x,y,r] of blobs){ ctx.beginPath(); ctx.arc(W*x,H*y,W*r,0,7); ctx.fill(); }
+  ctx.fillStyle="#6fa24b"; for(const [x,y,r] of blobs){ ctx.beginPath(); ctx.arc(W*x-W*0.02,H*y-H*0.02,W*r*0.78,0,7); ctx.fill(); }
+  ctx.fillStyle="#8cbb5e"; ctx.beginPath(); ctx.arc(W*0.43,H*0.24,W*0.09,0,7); ctx.fill();
+}
+
+const cA = document.getElementById("srcA"), aCtx = cA.getContext("2d");
+const cB = document.getElementById("srcB"), bCtx = cB.getContext("2d");
+const out = document.getElementById("out"), oCtx = out.getContext("2d");
+drawSapling(aCtx); drawMature(bCtx);
+const dataA = aCtx.getImageData(0,0,W,H).data;
+const dataB = bCtx.getImageData(0,0,W,H).data;
+
+// ---- Beier–Neely warp ------------------------------------------------------
+function bilinear(data, fx, fy, out4){
+  fx = Math.max(0, Math.min(W-1.001, fx)); fy = Math.max(0, Math.min(H-1.001, fy));
+  const x0=fx|0, y0=fy|0, dx=fx-x0, dy=fy-y0;
+  const i00=(y0*W+x0)*4, i10=i00+4, i01=i00+W*4, i11=i01+4;
+  for(let k=0;k<3;k++){
+    const a=data[i00+k]*(1-dx)+data[i10+k]*dx, b=data[i01+k]*(1-dx)+data[i11+k]*dx;
+    out4[k]=a*(1-dy)+b*dy;
+  }
+}
+// warp source `data` (with source lines `S`) to destination lines `L`, sample at (x,y)
+function warpSample(data, S, L, x, y, out4){
+  let sumX=0,sumY=0,wsum=0;
+  for(let i=0;i<L.length;i++){
+    const Px=L[i][0],Py=L[i][1],Qx=L[i][2],Qy=L[i][3];
+    const PQx=Qx-Px,PQy=Qy-Py, len2=PQx*PQx+PQy*PQy, len=Math.sqrt(len2)+1e-6;
+    const u=((x-Px)*PQx+(y-Py)*PQy)/len2;
+    const v=((x-Px)*(-PQy)+(y-Py)*PQx)/len;          // perp = (-PQy, PQx)
+    const sx0=S[i][0],sy0=S[i][1],sx1=S[i][2],sy1=S[i][3];
+    const SPQx=sx1-sx0,SPQy=sy1-sy0, slen=Math.sqrt(SPQx*SPQx+SPQy*SPQy)+1e-6;
+    const Xx=sx0+u*SPQx+v*(-SPQy)/slen;
+    const Xy=sy0+u*SPQy+v*(SPQx)/slen;
+    const uc=u<0?0:u>1?1:u, cx=Px+uc*PQx, cy=Py+uc*PQy;
+    const dist=Math.hypot(x-cx,y-cy);
+    const w=Math.pow(Math.pow(len,0.5)/(2.0+dist),1.8);
+    sumX+=(Xx-x)*w; sumY+=(Xy-y)*w; wsum+=w;
+  }
+  bilinear(data, x+sumX/wsum, y+sumY/wsum, out4);
+}
+
+// ---- precompute morph frames ----------------------------------------------
+const Apx = LINES.map(l=>px(l.a)), Bpx = LINES.map(l=>px(l.b));
+const frames = [];
+function precompute(){
+  const ca=[0,0,0], cb=[0,0,0];
+  for(let f=0; f<NF; f++){
+    const t=f/(NF-1);
+    const L = LINES.map((_,i)=>[ Apx[i][0]+(Bpx[i][0]-Apx[i][0])*t, Apx[i][1]+(Bpx[i][1]-Apx[i][1])*t,
+                                 Apx[i][2]+(Bpx[i][2]-Apx[i][2])*t, Apx[i][3]+(Bpx[i][3]-Apx[i][3])*t ]);
+    const img = oCtx.createImageData(W,H); const d=img.data;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      warpSample(dataA, Apx, L, x, y, ca);
+      warpSample(dataB, Bpx, L, x, y, cb);
+      const o=(y*W+x)*4;
+      d[o]  =ca[0]*(1-t)+cb[0]*t;
+      d[o+1]=ca[1]*(1-t)+cb[1]*t;
+      d[o+2]=ca[2]*(1-t)+cb[2]*t;
+      d[o+3]=255;
+    }
+    frames.push(img);
+  }
+}
+precompute();
+
+// ---- feature-line overlay (for the report) --------------------------------
+function drawLines(ctx, lines){
+  ctx.lineWidth=1.6; ctx.strokeStyle="rgba(214,40,40,.9)"; ctx.fillStyle="rgba(214,40,40,.9)";
+  for(const l of lines){ ctx.beginPath(); ctx.moveTo(l[0],l[1]); ctx.lineTo(l[2],l[3]); ctx.stroke();
+    ctx.beginPath(); ctx.arc(l[2],l[3],2.5,0,7); ctx.fill(); }
+}
+function redrawSources(){
+  drawSapling(aCtx); drawMature(bCtx);
+  if(showLines.checked){ drawLines(aCtx, Apx); drawLines(bCtx, Bpx); }
+}
+
+// ---- playback (ping-pong) --------------------------------------------------
+const slider=document.getElementById("t"), tv=document.getElementById("tv");
+const playBtn=document.getElementById("play"), showLines=document.getElementById("showLines");
+let playing=true, t0=null;
+function showFrame(t){
+  const idx=Math.max(0,Math.min(NF-1,Math.round(t*(NF-1))));
+  oCtx.putImageData(frames[idx],0,0);
+  slider.value=t; tv.textContent=t.toFixed(2);
+}
+slider.addEventListener("input",e=>{ playing=false; playBtn.textContent="▶ 播放"; showFrame(parseFloat(e.target.value)); });
+playBtn.addEventListener("click",()=>{ playing=!playing; playBtn.textContent=playing?"⏸ 暫停":"▶ 播放"; t0=null; });
+showLines.addEventListener("change",redrawSources);
+
+function loop(now){
+  if(playing){
+    if(t0===null) t0=now;
+    const p=((now-t0)/1000/3.2)%2;          // 3.2s each direction
+    showFrame(p<1 ? p : 2-p);               // ping-pong A→B→A
+  }
+  requestAnimationFrame(loop);
+}
+redrawSources();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

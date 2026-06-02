@@ -21,11 +21,26 @@ const _mat = new THREE.Matrix4();
 const _pos = new THREE.Vector3();
 const _col = new THREE.Color();
 
-// Local crossed-quad frames: quad A spans world X/Y (normal +Z), quad B spans
-// world Z/Y (normal +X). Both stay vertical so foliage hangs naturally.
+// Local crossed-quad frames: quad A spans world X/Y, quad B spans world Z/Y.
+// Both stay vertical so foliage hangs naturally. `normal` is the geometric
+// facing of each quad; it is NOT used as the shading normal (we force that to
+// world-up below, mirroring the real-time billboard lighting) — kept here only
+// to document the quad orientation.
 const FRAMES = [
   { right: [1, 0, 0], up: [0, 1, 0], normal: [0, 0, 1] },
   { right: [0, 0, 1], up: [0, 1, 0], normal: [1, 0, 0] },
+];
+// Denser frame set for tree foliage: 3 vertical quads in an asterisk (0/60/120°
+// around world-up) instead of 2. Two crossed quads leave wide wedge gaps that
+// an oblique/iso camera sees straight through to the dark canopy interior;
+// three quads close those wedges so the canopy reads as a filled mass from any
+// horizontal angle. Grass keeps the cheaper 2-quad set.
+const C60 = Math.cos(Math.PI / 3);
+const S60 = Math.sin(Math.PI / 3);
+const FOLIAGE_FRAMES = [
+  { right: [1, 0, 0], up: [0, 1, 0], normal: [0, 0, 1] },
+  { right: [C60, 0, S60], up: [0, 1, 0], normal: [0, 0, 1] },
+  { right: [-C60, 0, S60], up: [0, 1, 0], normal: [0, 0, 1] },
 ];
 // quad corners as (rightSign, upSign) with matching uv
 const CORNERS = [
@@ -37,13 +52,19 @@ const CORNERS = [
 
 // Build a static Mesh (crossed quads) reproducing an InstancedMesh of billboards.
 // The result lives in the same local space as `inst`, so parent it to inst.parent.
-export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
+export function mergeBillboardsToMesh(inst, { roughness = 0.8, translucent = false } = {}) {
   const count = inst.count;
   const map = inst.material.map ?? null;
   const baseColor = inst.material.color ? inst.material.color.clone() : new THREE.Color(0xffffff);
 
-  const vertsPerInst = FRAMES.length * 4; // 8
-  const trisPerInst = FRAMES.length * 2; // 4
+  // Foliage uses the denser 3-quad asterisk + slightly enlarged quads so the
+  // crossed planes overlap into a filled canopy; grass keeps the cheap 2-quad
+  // cross at native size.
+  const frames = translucent ? FOLIAGE_FRAMES : FRAMES;
+  const sizeScale = translucent ? 1.4 : 1.0;
+
+  const vertsPerInst = frames.length * 4;
+  const trisPerInst = frames.length * 2;
   const positions = new Float32Array(count * vertsPerInst * 3);
   const normals = new Float32Array(count * vertsPerInst * 3);
   const uvs = new Float32Array(count * vertsPerInst * 2);
@@ -72,16 +93,24 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
     else _col.set(0xffffff);
     _col.multiply(baseColor);
 
-    for (const f of FRAMES) {
+    const ssx = sx * sizeScale;
+    const ssy = sy * sizeScale;
+    for (const f of frames) {
       const quadBase = vi;
       for (const c of CORNERS) {
         const p3 = vi * 3;
-        positions[p3 + 0] = _pos.x + c.r * sx * f.right[0] + c.u * sy * f.up[0];
-        positions[p3 + 1] = _pos.y + c.r * sx * f.right[1] + c.u * sy * f.up[1];
-        positions[p3 + 2] = _pos.z + c.r * sx * f.right[2] + c.u * sy * f.up[2];
-        normals[p3 + 0] = f.normal[0];
-        normals[p3 + 1] = f.normal[1];
-        normals[p3 + 2] = f.normal[2];
+        positions[p3 + 0] = _pos.x + c.r * ssx * f.right[0] + c.u * ssy * f.up[0];
+        positions[p3 + 1] = _pos.y + c.r * ssx * f.right[1] + c.u * ssy * f.up[1];
+        positions[p3 + 2] = _pos.z + c.r * ssx * f.right[2] + c.u * ssy * f.up[2];
+        // Shade normal points world-up, NOT along the quad face. This mirrors
+        // the real-time billboard material (materials.js flattens the normal to
+        // world-up) so foliage is lit evenly by the sky/sun like the ground.
+        // The quads stay vertical for silhouette + shadow casting; only the
+        // lighting normal is lifted. Without this, sideways-facing normals get
+        // almost no light under the overhead sun and the canopy renders black.
+        normals[p3 + 0] = 0;
+        normals[p3 + 1] = 1;
+        normals[p3 + 2] = 0;
         colors[p3 + 0] = _col.r;
         colors[p3 + 1] = _col.g;
         colors[p3 + 2] = _col.b;
@@ -114,7 +143,13 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
   geo.setAttribute("color", new THREE.BufferAttribute(colors.subarray(0, vi * 3), 3));
   geo.setIndex(new THREE.BufferAttribute(indices.subarray(0, ii), 1));
 
-  const mat = new THREE.MeshStandardMaterial({
+  // Real leaves are thin translucent slabs: light transmits through the upper
+  // canopy to fill the leaves below, which is why foliage reads bright even in
+  // shadow. An opaque MeshStandardMaterial can't do this, so a dense path-traced
+  // canopy goes near-black. Approximate Habel 2007's leaf translucency with
+  // MeshPhysicalMaterial transmission + a green attenuation tint (the path
+  // tracer supports both). Non-foliage billboards (if any) stay opaque.
+  const matParams = {
     map, // original alpha texture (leaf/blade shape + colour)
     color: 0xffffff, // tint comes from the baked vertex colours
     vertexColors: true,
@@ -123,7 +158,18 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
     side: THREE.DoubleSide,
     roughness,
     metalness: 0.0,
-  });
+  };
+  const mat = translucent
+    ? new THREE.MeshPhysicalMaterial({
+        ...matParams,
+        transmission: 0.6, // fraction of light that passes through the leaf
+        thickness: 0.4, // slab thickness driving attenuation
+        ior: 1.4,
+        attenuationColor: new THREE.Color(0x6f9a4e), // transmitted light picks up leaf green
+        attenuationDistance: 0.6,
+        specularIntensity: 0.4,
+      })
+    : new THREE.MeshStandardMaterial(matParams);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
