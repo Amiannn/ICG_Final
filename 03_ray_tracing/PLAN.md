@@ -313,43 +313,46 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 | 樹葉 NaN 崩潰修復（top skirt `shelfR(1)=0` → `0/0`） | ✅ | `01/src/scene/tree.js`、`merge_instances.js`（non-finite 實例 fail-soft 跳過） |
 | cel ramp 最暗 band 不再壓成純黑（lifted shadow floor 0.22） | ✅ | `post_pixelart.js`（`CEL_SHADOW_FLOOR`） |
 | 樹葉著色法線改朝世界上方（對齊即時 billboard 打光） | ✅ | `merge_instances.js` |
-| **8 葉片半透明（Habel 2007 近似）** | ✅ 初版 | `merge_instances.js`（foliage 用 `MeshPhysicalMaterial` transmission 0.6 / thickness 0.4 / 綠色 attenuation；grass 維持不透明） |
 | 樹冠覆蓋率（2→3 quad asterisk + 1.4x，補滿葉縫看穿問題） | ✅ | `merge_instances.js`（`FOLIAGE_FRAMES`） |
+| **1 樹葉亮度/顏色微調（黑樹冠修復）** | ✅ | `merge_instances.js` + `post_pixelart.js`（見下方說明） |
+| **8 葉片半透明（Habel 2007 近似）** | ✅ 改用 emissive | `merge_instances.js`（transmission 近似在密集疊片下越疊越黑，改用 Habel 的「additive self-illumination」做法＝emissive glow floor） |
+| **9 寫實 hero shot 對照切換** | ✅ | `raytrace_mode.js`（`#pt-photoreal` 按鈕）+ `post_pixelart.js`（`renderPhotoreal`：bypass cel/outline，純 ACES+sRGB 全解析度輸出） |
+| **7 stratified sampling 確認** | ✅ 確認預設已開 | three-gpu-pathtracer 預設 `RANDOM_TYPE=2`（stratified list，等同 term pj 的 Owen-scrambled Sobol 精神）；Sobol(type1) 會壞 macOS compiler，不動 |
 
-**目前 demo 視覺狀態**：樹冠已是完整針葉樹形（不再稀疏看穿到樹幹），但整體仍偏暗、
-偏去飽和的深綠。亮度/飽和度微調尚未做。
+**樹冠由黑變綠的關鍵診斷（item 1，路徑追蹤沙箱逐張比對得出）**：
+1. **看穿到黑**：sprig 貼圖是稀疏羽狀 alpha cutout（alphaTest 0.5），在真正的 GI 下相機光線會穿過葉縫，
+   打到自陰影的樹冠內部＋棕色 core，於是樹冠變成近黑剪影；即時 billboard 永遠面向相機所以看不到這問題。
+   **解法**：foliage 端**丟掉 alpha cutout**，烘成**實心**交叉 quad（3-quad asterisk 直接填滿、無縫），
+   葉色改由 per-instance vertex-colour 漸層（tree.js 的 dark→warm，再 lerp 向亮綠 `_LIFT` 0x9ccc6a 提亮）提供。
+2. **半透明（item 8）**：原本 `MeshPhysicalMaterial` transmission 在多層疊片下 Beer-Lambert 吸收越疊越黑；
+   改成 Habel 2007 real-time 近似的本質做法——**additive self-illumination（emissive glow floor 0x4c7d33 @0.7）**，
+   path tracer 直接在表面加 emission（不被 albedo 調制、也不被前方葉片吸收），陰影內葉片有柔和綠光、不再壓黑。
+   `roughness=1.0` 讓葉片純漫反射，避免偏藍天空 env 在暗綠葉面上反出紫色高光。
+3. **post 去飽和過頭**：`post_pixelart.js` COMP grade 原本 `mix(luma,color,0.88)`＋airy wash 0.11 把綠吃掉，
+   放寬到 0.94 / 0.07 讓綠更跳（只影響 PT 視圖，不動即時端）。
+
+**目前 demo 視覺狀態**：樹冠已是完整、飽和的針葉綠（pixel-art / photoreal 兩視圖都正常），
+地面有 path-traced 柔和接觸陰影。三張對照圖見 `docs/screenshots/compare_*.png`。
 
 ### 9.2 待完成（接續工作，依優先序）
 
-1. **樹葉亮度/顏色微調**（半小時，純調參，先做）
-   - 方向：提高 foliage 的 albedo 或降低 transmission 讓綠色更跳；或在 `post_pixelart.js`
-     的 COMP grade 對綠色不要過度去飽和（目前 `color = mix(vec3(luma), color, 0.88)` 會吃掉飽和度）。
-   - 也可微調 `ENV_INTENSITY` 與 attenuationColor。**這是純參數,要在沙箱逐張比對(見 9.3)。**
+> 註：原 §9.2 的 item 1（樹葉微調）、7（stratified）、9（hero shot）已完成，移到 §9.1。
+
+1. **PLAN 項目 5 — OIDN 降噪**（1 天,效能/畫面最大加成,**下一個最該做**）
+   - 套件：[DennisSmolek/Denoiser](https://github.com/DennisSmolek/Denoiser)（tfjs WebGL backend，首選）。
+   - 需從 path tracer 拉 albedo + normal AOV（`post_pixelart._renderNormals` 已有 normal prepass 可重用,
+     albedo 要另接）。在 `post_pixelart` 之**前**插一層 denoise。目標：4 spp ≈ 32 spp。
+   - 注意 §9.3 B：裝套件請在專案外或小心 lockfile/Vite optimize。
 
 2. **PLAN 項目 6 — Hashed Alpha Testing（Wyman & McGuire 2017）**（半天）
-   - 目前 foliage 用硬 `alphaTest: 0.5`,葉緣鋸齒、且 path tracer 不做 stochastic。
-   - 作法 A（path tracer 端）：把 foliage 材質改 `transparent: true` + 用貼圖 alpha,
-     讓 tracer 走 stochastic transparency（多 sample 累積→柔邊、視覺更滿）。需確認與
-     transmission 並存的行為。
-   - 作法 B（即時端,對應原 PLAN 的 `alpha_leaf.js`）：在 real-time billboard shader
-     注入 hash(worldPos) 比對 alpha。兩端可分別做,報告各放一張。
+   - **現況變更**：foliage 端已**不再用 alpha cutout**（改實心 quad,見 §9.1），所以原本「path tracer
+     端 stochastic transparency」這條已無對象。本項剩**即時端**（real-time billboard shader）。
+   - 作法（對應原 PLAN 的 `alpha_leaf.js`）：在 `01/src/materials.js` 的 billboard fragment shader
+     注入 `hash(worldPos)` 當 alpha 門檻取代硬 `alphaTest 0.5`,配合 TAA/累積得到柔邊。報告放即時端一張。
 
-3. **PLAN 項目 5 — OIDN 降噪**（1 天,效能/畫面最大加成）
-   - 套件：[DennisSmolek/Denoiser](https://github.com/DennisSmolek/Denoiser)（tfjs WebGL backend，首選）。
-   - 需從 path tracer 拉 albedo + normal AOV（`raytrace_mode` 已有 normal prepass 可重用,
-     albedo 要另接）。在 `post_pixelart` 之**前**插一層 denoise。目標：4 spp ≈ 32 spp。
-
-4. **PLAN 項目 7 — Sobol / stratified sampling**（1 小時）
-   - 確認 three-gpu-pathtracer 的 `FEATURE_SOBOL` / `RANDOM_TYPE` 是否預設開;若否在
-     `raytrace_mode` 設定。對應 term pj 的 Owen-scrambled Sobol。
-
-5. **PLAN 項目 9 — 寫實 hero shot 對照**（1 小時）
-   - `raytrace_mode` 加一個開關 bypass `post_pixelart`（或 cel/outline pass 設 0）,
-     直接輸出 path tracer 的 ACES tonemap 結果。報告放 real-time / pixel-art PT /
-     photoreal PT 三張對照。
-
-6. **（選）8 葉片半透明精修**：目前是 transmission 近似,可評估是否用更貼近 Habel 的
-   雙面 thin-translucency,或調 thickness/attenuationDistance 讓背光更明顯。
+3. **（選）樹冠精修**：目前 foliage 是實心 vertex-colour quad,失去細葉剪影（pixel-art 解析度下其實看不太出來,
+   outline pass 也會重新風格化）。若要更細緻,可評估：(a) 在實心樹冠**外殼**再疊一層 alpha-cutout 葉片補細節,
+   或 (b) 提高 emissive glow 對比讓 tier 更分明。亦可微調 `_LIFT` / `FOLIAGE_LIFT` / emissive 讓頂部更暖。
 
 ### 9.3 開發/驗證須知（踩過的雷,務必先讀）
 
@@ -389,9 +392,13 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 
 ### 9.4 關鍵檔案地圖
 - `03_ray_tracing/src/raytrace_mode.js` — mode plugin:hide instanced/points/water →
-  merge billboards(foliage `translucent:true`,grass `false`)→ 換 MeshStandardMaterial →
-  IBL env → perspective cam → `WebGLPathTracer` + BVH worker → 每 frame `renderSample` + post。
+  merge billboards(foliage `foliage:true`,grass `false`)→ 換 MeshStandardMaterial →
+  IBL env → perspective cam → `WebGLPathTracer`(stratified sampling,見 §9.1 item 7)+ BVH worker →
+  每 frame `renderSample` + post。`#pt-photoreal` 按鈕切 pixel-art / photoreal(`_state.photoreal`)。
 - `03_ray_tracing/src/merge_instances.js` — billboard→static crossed-quad 烘焙;`FRAMES`(grass 2 quad)
-  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk + 1.4x);foliage 走 `MeshPhysicalMaterial` 半透明。
-- `03_ray_tracing/src/post_pixelart.js` — cel ramp(含 `CEL_SHADOW_FLOOR`)+ outline + low-res upscale。
+  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk + 1.4x);**foliage = 實心 quad + vertex-colour 漸層(`_LIFT` 提亮)
+  + emissive glow floor(Habel 近似)**;grass = map + alphaTest cutout。
+- `03_ray_tracing/src/post_pixelart.js` — `render()`:cel ramp(含 `CEL_SHADOW_FLOOR`)+ outline + low-res
+  upscale + COMP grade(去飽和已放寬);`renderPhotoreal()`:bypass 全部,純 ACES+sRGB 全解析度(hero shot)。
 - `01_webgl_tree/src/scene/tree.js` — 樹幾何;foliage instance 生成(droop 已修 `R>0` 防 NaN)。
+- 驗證沙箱:`~/pptr-sandbox/shot.mjs`(headful + KHR ext hider,`--mode/--spp/--clicks/--motionoff/--clean`)。

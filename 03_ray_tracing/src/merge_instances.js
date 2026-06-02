@@ -50,9 +50,16 @@ const CORNERS = [
   { r: -0.5, u: 0.5, uv: [0, 1] },
 ];
 
+// Lift the dark baked foliage greens toward a brighter leaf green. The canopy's
+// vertex-colour gradient bottoms out at a near-black green (tree.js darkGreen
+// 0x33522d); under real GI that base reads too dark, so we nudge every foliage
+// colour toward this lush green to match the real-time view's brightness.
+const _LIFT = new THREE.Color(0x9ccc6a);
+const FOLIAGE_LIFT = 0.22;
+
 // Build a static Mesh (crossed quads) reproducing an InstancedMesh of billboards.
 // The result lives in the same local space as `inst`, so parent it to inst.parent.
-export function mergeBillboardsToMesh(inst, { roughness = 0.8, translucent = false } = {}) {
+export function mergeBillboardsToMesh(inst, { roughness = 0.8, foliage = false } = {}) {
   const count = inst.count;
   const map = inst.material.map ?? null;
   const baseColor = inst.material.color ? inst.material.color.clone() : new THREE.Color(0xffffff);
@@ -60,8 +67,8 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, translucent = fal
   // Foliage uses the denser 3-quad asterisk + slightly enlarged quads so the
   // crossed planes overlap into a filled canopy; grass keeps the cheap 2-quad
   // cross at native size.
-  const frames = translucent ? FOLIAGE_FRAMES : FRAMES;
-  const sizeScale = translucent ? 1.4 : 1.0;
+  const frames = foliage ? FOLIAGE_FRAMES : FRAMES;
+  const sizeScale = foliage ? 1.4 : 1.0;
 
   const vertsPerInst = frames.length * 4;
   const trisPerInst = frames.length * 2;
@@ -92,6 +99,7 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, translucent = fal
     if (inst.instanceColor) _col.fromArray(inst.instanceColor.array, i * 3);
     else _col.set(0xffffff);
     _col.multiply(baseColor);
+    if (foliage) _col.lerp(_LIFT, FOLIAGE_LIFT);
 
     const ssx = sx * sizeScale;
     const ssy = sy * sizeScale;
@@ -143,33 +151,55 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, translucent = fal
   geo.setAttribute("color", new THREE.BufferAttribute(colors.subarray(0, vi * 3), 3));
   geo.setIndex(new THREE.BufferAttribute(indices.subarray(0, ii), 1));
 
-  // Real leaves are thin translucent slabs: light transmits through the upper
-  // canopy to fill the leaves below, which is why foliage reads bright even in
-  // shadow. An opaque MeshStandardMaterial can't do this, so a dense path-traced
-  // canopy goes near-black. Approximate Habel 2007's leaf translucency with
-  // MeshPhysicalMaterial transmission + a green attenuation tint (the path
-  // tracer supports both). Non-foliage billboards (if any) stay opaque.
-  const matParams = {
-    map, // original alpha texture (leaf/blade shape + colour)
-    color: 0xffffff, // tint comes from the baked vertex colours
-    vertexColors: true,
-    alphaTest: 0.5, // cutout silhouette (matches the billboard material)
-    transparent: false,
-    side: THREE.DoubleSide,
-    roughness,
-    metalness: 0.0,
-  };
-  const mat = translucent
-    ? new THREE.MeshPhysicalMaterial({
-        ...matParams,
-        transmission: 0.6, // fraction of light that passes through the leaf
-        thickness: 0.4, // slab thickness driving attenuation
-        ior: 1.4,
-        attenuationColor: new THREE.Color(0x6f9a4e), // transmitted light picks up leaf green
-        attenuationDistance: 0.6,
-        specularIntensity: 0.4,
+  // The path tracer renders true GI, so foliage can't lean on the real-time toon
+  // ramp's lifted shadow floor to stay bright. Two foliage-specific problems had
+  // to be solved here (see PLAN §9.2 item 1):
+  //
+  //   1. See-through-to-black. The sprig texture is a sparse feathery cutout
+  //      (alphaTest 0.5). Under real GI, camera rays thread through the gaps and
+  //      hit the dark self-shadowed canopy interior + brown core, so the canopy
+  //      read as a near-black silhouette. Camera-facing real-time billboards
+  //      never expose this. Fix: drop the alpha cutout for foliage and bake SOLID
+  //      crossed quads — the 3-quad asterisk then fills into an opaque canopy with
+  //      no see-through gaps. The per-instance vertex-colour gradient (dark base
+  //      -> warm crown, baked from tree.js) supplies the leaf colour in place of
+  //      the texture; the fine leaf silhouette is below the pixel-art resolution
+  //      anyway and the outline pass re-stylises the mass.
+  //
+  //   2. Translucency. Real leaves transmit light and read bright even in shadow.
+  //      MeshPhysicalMaterial transmission was tried (transmission 0.6 / thickness
+  //      0.4) but compounded Beer-Lambert absorption across the many overlapping
+  //      cards into an even darker canopy. Instead we approximate Habel 2007's
+  //      real-time leaf translucency the way that paper does — as an ADDITIVE
+  //      self-illumination term (emissive). It lifts shadowed inner foliage to a
+  //      soft green glow with no darkening, and the path tracer adds emission
+  //      directly at the surface (not modulated by albedo: see get_surface_record
+  //      — emission = emissiveIntensity * emissive), so stacked cards can't absorb
+  //      it away. roughness 1.0 keeps the leaves fully diffuse so the bluish sky
+  //      environment doesn't cast a purple specular sheen on the dark greens.
+  //
+  // Grass keeps the cheap map + alphaTest cutout: it sits flat on the ground, is
+  // lit fine, and seeing the ground through blade gaps is correct.
+  const mat = foliage
+    ? new THREE.MeshStandardMaterial({
+        color: 0xffffff, // tint comes from the baked vertex colours
+        vertexColors: true,
+        side: THREE.DoubleSide,
+        roughness: 1.0,
+        metalness: 0.0,
+        emissive: new THREE.Color(0x4c7d33), // Habel-style additive translucency glow floor
+        emissiveIntensity: 0.7,
       })
-    : new THREE.MeshStandardMaterial(matParams);
+    : new THREE.MeshStandardMaterial({
+        map, // alpha texture (blade shape + colour)
+        color: 0xffffff,
+        vertexColors: true,
+        alphaTest: 0.5, // cutout silhouette (matches the billboard material)
+        transparent: false,
+        side: THREE.DoubleSide,
+        roughness,
+        metalness: 0.0,
+      });
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;

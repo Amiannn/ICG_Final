@@ -64,6 +64,8 @@ export const raytraceMode = {
       post: null, // M3 pixel-art post chain (cel + outline + low-res upscale)
       ready: false,
       hud: null, // sample-count overlay
+      photoreal: false, // report hero-shot: bypass pixel-art post (PLAN item 9)
+      photorealBtn: null,
       lastTargetWorld: new THREE.Vector3(),
       lastEyeWorld: new THREE.Vector3(),
     };
@@ -89,11 +91,11 @@ export const raytraceMode = {
     //     inherits the same world transform.
     for (const obj of _state.hidden) {
       if (!obj.isInstancedMesh || !obj.material || !obj.material.map || !obj.parent) continue;
-      // Tree foliage gets leaf translucency (transmission); the ground grass
-      // stays opaque so the 18k-blade canopy doesn't slow convergence — it's lit
-      // fine sitting flat on the ground anyway.
-      const translucent = obj !== world.grass;
-      const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, translucent });
+      // Tree foliage gets the solid + emissive-translucency canopy treatment;
+      // the ground grass stays a cheap alpha-cutout cross (lit fine flat on the
+      // ground, and seeing the ground through blade gaps is correct).
+      const foliage = obj !== world.grass;
+      const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, foliage });
       obj.parent.add(mesh);
       _state.merged.push({ mesh, parent: obj.parent });
     }
@@ -161,6 +163,13 @@ export const raytraceMode = {
     tracer.tiles.set(2, 2);
     tracer.renderToCanvas = true;
     tracer.filterGlossyFactor = 0.5; // clamp glossy fireflies -> faster perceptual convergence
+    // Sampling (PLAN item 7). three-gpu-pathtracer's PhysicalPathTracingMaterial
+    // already defaults to RANDOM_TYPE = 2 (stratified-list sampling), the
+    // higher-quality, lower-variance option — the spiritual sibling of the
+    // Owen-scrambled Sobol sequence used in the term-project CPU tracer. We
+    // deliberately keep it: RANDOM_TYPE 1 (Sobol) is documented in the library to
+    // break the shader compiler on macOS, and 0 (PCG) is noisier. So stratified
+    // sampling is confirmed active by default; no override is needed.
     _state.pathTracer = tracer;
 
     // M3 post chain — renders the traced output in the pixel-art register.
@@ -179,6 +188,7 @@ export const raytraceMode = {
     //    the current spp and a "building BVH / converging / converged" state —
     //    without it the progressive refinement looks like it never finishes.
     _state.hud = this._buildHud();
+    _state.photorealBtn = this._buildPhotorealToggle();
 
     const p = tracer.setSceneAsync(scene, persp);
     if (p && typeof p.then === "function") {
@@ -201,24 +211,30 @@ export const raytraceMode = {
     if (_state.ready) {
       _state.pathTracer.renderSample();
 
-      // Post chain runs at the same low-res as the real-time view so the pixel
-      // grid matches. uVertical resolution drives the block size.
-      const { renderer, scene, settings } = ctx;
-      const bufH = renderer.domElement.height;
-      const bufW = renderer.domElement.width;
-      const displayH = Math.max(1, settings.verticalResolution);
-      const displayW = Math.max(1, Math.round(displayH * (bufW / bufH)));
-      _state.post.setSize(displayW, displayH);
+      if (_state.photoreal) {
+        // Report hero shot: raw ACES-tonemapped radiance at full resolution,
+        // no cel/outline/pixelation (PLAN item 9).
+        _state.post.renderPhotoreal(_state.pathTracer.target.texture);
+      } else {
+        // Post chain runs at the same low-res as the real-time view so the pixel
+        // grid matches. uVertical resolution drives the block size.
+        const { renderer, scene, settings } = ctx;
+        const bufH = renderer.domElement.height;
+        const bufW = renderer.domElement.width;
+        const displayH = Math.max(1, settings.verticalResolution);
+        const displayW = Math.max(1, Math.round(displayH * (bufW / bufH)));
+        _state.post.setSize(displayW, displayH);
 
-      const outline = settings.outlines ? settings.outlineStrength : 0;
-      _state.post.render({
-        colorTex: _state.pathTracer.target.texture,
-        scene,
-        camera: _state.perspCam,
-        outline,
-        grain: settings.grain,
-        time,
-      });
+        const outline = settings.outlines ? settings.outlineStrength : 0;
+        _state.post.render({
+          colorTex: _state.pathTracer.target.texture,
+          scene,
+          camera: _state.perspCam,
+          outline,
+          grain: settings.grain,
+          time,
+        });
+      }
     }
     this._updateHud();
   },
@@ -266,6 +282,7 @@ export const raytraceMode = {
     if (_state.envTex) _state.envTex.dispose();
 
     if (_state.hud) _state.hud.remove();
+    if (_state.photorealBtn) _state.photorealBtn.remove();
 
     renderer.toneMapping = _state.toneMapping;
     renderer.autoClear = _state.autoClear;
@@ -297,6 +314,36 @@ export const raytraceMode = {
     return el;
   },
 
+  // Report hero-shot toggle (PLAN item 9). Flips between the pixel-art post
+  // chain and the raw ACES/sRGB photoreal blit. Sits just above the spp HUD.
+  _buildPhotorealToggle() {
+    const btn = document.createElement("button");
+    btn.id = "pt-photoreal";
+    btn.type = "button";
+    btn.textContent = "◻ Photoreal";
+    btn.style.cssText = [
+      "position:fixed",
+      "right:12px",
+      "bottom:64px",
+      "z-index:21",
+      "padding:6px 12px",
+      "font:12px/1.2 ui-monospace,Menlo,Consolas,monospace",
+      "color:#cdeae8",
+      "background:rgba(8,18,20,0.72)",
+      "border:1px solid rgba(120,200,195,0.35)",
+      "border-radius:8px",
+      "cursor:pointer",
+    ].join(";");
+    btn.addEventListener("click", () => {
+      if (!_state) return;
+      _state.photoreal = !_state.photoreal;
+      btn.textContent = _state.photoreal ? "◼ Photoreal" : "◻ Photoreal";
+      btn.style.color = _state.photoreal ? "#fff2c8" : "#cdeae8";
+    });
+    document.body.appendChild(btn);
+    return btn;
+  },
+
   _updateHud() {
     const el = _state.hud;
     if (!el) return;
@@ -306,7 +353,8 @@ export const raytraceMode = {
     }
     const spp = Math.floor(_state.pathTracer.samples || 0);
     const status = spp >= 64 ? "converged" : spp <= 1 ? "tracing…" : "converging…";
-    el.textContent = `Path trace · ${status}\n${spp} spp`;
+    const look = _state.photoreal ? "photoreal" : "pixel-art";
+    el.textContent = `Path trace · ${status} · ${look}\n${spp} spp`;
   },
 
   _syncCamera(ctx) {
