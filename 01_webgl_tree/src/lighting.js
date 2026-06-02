@@ -37,17 +37,47 @@ export class Lighting {
     this._daySun = new THREE.Color(palette.sunDay);
     this._nightSun = new THREE.Color(palette.sunNight);
     this._tmp = new THREE.Color();
+
+    this._night = false;
+    this._rain = false; // overcast when raining: no direct sun
   }
 
   setNight(isNight) {
-    const t = isNight ? 1 : 0;
-    this.sun.color.copy(this._tmp.copy(this._daySun).lerp(this._nightSun, t));
-    this.sun.intensity = isNight ? 0.8 : 2.4;
-    this.hemi.intensity = isNight ? 0.6 : 1.3;
-    this.hemi.groundColor.set(isNight ? 0x2a3450 : 0x6f8a52);
+    this._night = isNight;
+    this._apply();
+  }
 
-    const sky = this._tmp.copy(this._daySky).lerp(this._nightSky, t).clone();
-    const fog = this._daySky.clone().copy(this._dayFog).lerp(this._nightFog, t).clone();
+  setRain(isRain) {
+    this._rain = isRain;
+    this._apply();
+  }
+
+  // Resolve the lighting from the current weather. Rain ⇒ overcast: the direct
+  // sun is dimmed to a soft grey, and the sky/fog turn cool and flat — there is
+  // no sunshine in a downpour.
+  _apply() {
+    const t = this._night ? 1 : 0;
+    const sunColor = this._daySun.clone().lerp(this._nightSun, t);
+    let sunInt = this._night ? 0.8 : 2.4;
+    let hemiInt = this._night ? 0.6 : 1.3;
+    const groundCol = new THREE.Color(this._night ? 0x2a3450 : 0x6f8a52);
+    const sky = this._daySky.clone().lerp(this._nightSky, t);
+    const fog = this._dayFog.clone().lerp(this._nightFog, t);
+
+    if (this._rain) {
+      sunInt *= 0.3; // almost no direct sun under cloud cover
+      sunColor.lerp(new THREE.Color(0x9fb0c0), 0.7); // cool, desaturated
+      hemiInt *= 0.9; // flat overcast fill
+      const overcastSky = new THREE.Color(this._night ? 0x1b2333 : 0xa6bcc0);
+      const overcastFog = new THREE.Color(this._night ? 0x222b3c : 0xa3b6b8);
+      sky.lerp(overcastSky, 0.82);
+      fog.lerp(overcastFog, 0.85);
+    }
+
+    this.sun.color.copy(sunColor);
+    this.sun.intensity = sunInt;
+    this.hemi.intensity = hemiInt;
+    this.hemi.groundColor.copy(groundCol);
     this.scene.background = sky;
     if (this.scene.fog) this.scene.fog.color.copy(fog);
   }

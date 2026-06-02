@@ -213,6 +213,28 @@ export function makeTree(rng = mulberry32(11), S = 1.5) {
   if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
   group.add(leaves);
 
+  // Canopy shadow casters. The foliage is camera-facing billboards, which can't
+  // cast a sensible shadow (leaves have castShadow = false), so the cast shadow
+  // used to be only the trunk. A single cone looked unnatural; instead we add a
+  // few invisible blobs that follow the drooping foliage tiers, so the tree
+  // casts a soft, organic canopy shadow. They are colour/depth-silent in the
+  // main pass, skipped by the normal + path-trace passes, and live in the tree
+  // group so the shadow grows with the growth animation.
+  const shadowMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+  for (const f of [0.12, 0.34, 0.56, 0.78, 0.95]) {
+    const y = CANOPY_BASE + f * CANOPY_H;
+    const r = shelfR(f) * 0.92;
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), shadowMat);
+    blob.position.y = y;
+    blob.scale.set(1, 0.55, 1); // flatten like a skirt
+    blob.castShadow = true;
+    blob.receiveShadow = false;
+    blob.frustumCulled = false;
+    blob.userData.skipNormal = true;
+    blob.userData.shadowOnly = true; // path-trace hides these
+    group.add(blob);
+  }
+
   group.userData.leafCount = instances.length;
   group.userData.height = CANOPY_TOP;
   return group;

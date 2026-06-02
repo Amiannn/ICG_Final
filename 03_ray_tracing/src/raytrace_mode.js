@@ -76,6 +76,8 @@ export const raytraceMode = {
       const shouldHide =
         obj.isInstancedMesh ||
         obj.isPoints ||
+        obj.userData.shadowOnly || // v2 canopy shadow casters (invisible)
+        obj.userData.noReflect ||  // v2 wildlife groups (animals/birds)
         (world.water && obj === world.water.mesh);
       if (shouldHide) {
         _state.hidden.push(obj);

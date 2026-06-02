@@ -7,7 +7,8 @@ import { DustParticles } from "./effects/particles.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
-import { growthMode } from "./modes/growth_stub.js";
+import { growthMode } from "../../02_tree_growth/src/growth.js";
+import { growthMorphMode } from "../../02_tree_growth/src/growth_morph.js";
 import { raytraceMode } from "../../03_ray_tracing/src/raytrace_mode.js";
 
 const canvas = document.querySelector("#scene");
@@ -43,7 +44,7 @@ const ctx = {
   settings,
 };
 
-const modes = { realtime: realtimeMode, growth: growthMode, raytrace: raytraceMode };
+const modes = { realtime: realtimeMode, growth: growthMode, growthmorph: growthMorphMode, raytrace: raytraceMode };
 let currentMode = realtimeMode;
 currentMode.init(ctx);
 
@@ -93,6 +94,8 @@ function onSettingChange(key) {
     resize();
   } else if (key === "night") {
     lighting.setNight(settings.night);
+  } else if (key === "rain") {
+    lighting.setRain(settings.rain); // rain ⇒ overcast (no sun)
   }
   applyDynamicSettings();
 }
@@ -100,7 +103,8 @@ function onSettingChange(key) {
 function applyDynamicSettings() {
   pipeline.outline.uniforms.uEnabled.value = settings.outlines ? 1 : 0;
   pipeline.outline.uniforms.uStrength.value = settings.outlineStrength;
-  pipeline.godray.uniforms.uEnabled.value = settings.godrays ? 1 : 0;
+  // no sun shafts in the rain (overcast)
+  pipeline.godray.uniforms.uEnabled.value = settings.godrays && !settings.rain ? 1 : 0;
   dust.points.visible = settings.dust;
   pipeline.composite.uniforms.uRain.value = settings.rain ? 1 : 0;
   pipeline.composite.uniforms.uGrain.value = settings.grain ? 1 : 0;
@@ -109,5 +113,6 @@ function applyDynamicSettings() {
 
 function applyAllSettings() {
   lighting.setNight(settings.night);
+  lighting.setRain(settings.rain);
   applyDynamicSettings();
 }

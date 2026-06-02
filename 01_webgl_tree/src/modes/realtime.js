@@ -32,6 +32,17 @@ export const realtimeMode = {
     world.water.material.uniforms.uReflectEnabled.value = settings.water ? 1 : 0;
     dust.setTime(time);
 
+    // wildlife appears only on clear sunny days (hidden at night and in rain)
+    const sunny = !settings.night && !settings.rain;
+    if (world.animals) {
+      world.animals.group.visible = sunny;
+      if (sunny) world.animals.update(time);
+    }
+    if (world.birds) {
+      world.birds.group.visible = sunny;
+      if (sunny) world.birds.update(time);
+    }
+
     pipeline.render(ctx.scene, lighting.sun, time, (r, cam) => {
       world.water.updateReflection(r, cam, ctx.scene);
     });

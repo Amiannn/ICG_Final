@@ -207,17 +207,23 @@ export const compositeFragment = /* glsl */ `
     return vec2(uOverscan, uOverscan) + uv * uDisplaySize;
   }
 
-  // animated falling rain streaks in screen space
-  float rainLayer(vec2 uv, float scaleX, float speed, float slant) {
-    uv.x += uv.y * slant;
-    vec2 cell = vec2(scaleX, scaleX * 0.06);
-    vec2 id = floor(uv * cell);
-    vec2 f = fract(uv * cell);
-    float h = hash(id);
-    float drop = fract(h * 13.0 + uTime * speed * (0.6 + h));
-    float streak = smoothstep(0.0, 0.08, f.y) * smoothstep(drop, drop - 0.18, f.y);
-    float thin = smoothstep(0.5, 0.0, abs(f.x - 0.5));
-    return streak * thin * step(0.55, h);
+  // One layer of falling rain: thin, slightly wind-slanted streaks. Each screen
+  // column carries short drops that fall and wrap, with per-column random speed,
+  // phase and brightness, so it reads as natural rainfall rather than a static
+  // grid of dashes.
+  float rainLayer(vec2 uv, float cols, float speed, float slant, float density) {
+    uv.x += uv.y * slant;                       // wind shear
+    float x = uv.x * cols;
+    float ci = floor(x);
+    float cf = fract(x) - 0.5;
+    float r = hash(vec2(ci, 17.0));
+    if (r > density) return 0.0;                // gaps between active columns
+    float r2 = hash(vec2(ci, 41.0));
+    float line = smoothstep(0.16, 0.02, abs(cf));            // thin vertical line
+    float spd = speed * (0.75 + 0.5 * r2);
+    float pos = fract(uv.y * 3.0 + uTime * spd + r * 31.0);  // drops fall + wrap
+    float streak = smoothstep(0.0, 0.03, pos) * smoothstep(0.30, 0.04, pos);
+    return line * streak * (0.55 + 0.45 * r2);
   }
 
   void main() {
@@ -238,11 +244,18 @@ export const compositeFragment = /* glsl */ `
       color = mix(color, cool, 0.85);
     }
 
-    // rain (two layers)
+    // overcast grade when raining: greyer, cooler, a touch dimmer (no sunshine)
     if (uRain > 0.5) {
-      float r = rainLayer(vUv * vec2(1.0, 1.0), 60.0, 1.6, 0.06);
-      r += rainLayer(vUv * 1.3 + 0.37, 90.0, 2.3, 0.10) * 0.7;
-      color += vec3(0.55, 0.62, 0.7) * r * 0.5;
+      float lo = dot(color, vec3(0.299, 0.587, 0.114));
+      color = mix(color, vec3(lo), 0.28);
+      color *= vec3(0.88, 0.92, 0.98) * 0.95;
+    }
+
+    // rain: two depth layers (near = coarser/faster/brighter, far = fine/faint)
+    if (uRain > 0.5) {
+      float r = rainLayer(vUv, 80.0, 0.9, 0.16, 0.62);
+      r += rainLayer(vUv + vec2(0.37, 0.0), 150.0, 1.25, 0.12, 0.5) * 0.55;
+      color += vec3(0.66, 0.73, 0.82) * r * 0.32;
     }
 
     // film grain (kept subtle at night so it doesn't look like TV static)

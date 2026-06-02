@@ -88,7 +88,7 @@ export class Water {
             vec2 screenUv = vScreen.xy / vScreen.w * 0.5 + 0.5;
             screenUv += (swell - 0.5) * 0.03;
             vec3 refl = texture2D(tReflect, screenUv).rgb;
-            col = mix(col, refl, uReflectStrength * (0.6 + lines * 0.4));
+            col = mix(col, refl, uReflectStrength * (0.62 + lines * 0.38));
           }
 
           // soften the shoreline using the per-vertex edge factor (0 at rim)
@@ -149,10 +149,17 @@ export class Water {
     cam.projectionMatrix.copy(mainCamera.projectionMatrix);
     cam.projectionMatrixInverse.copy(mainCamera.projectionMatrixInverse);
 
-    // flip culling-sensitive faces to double-sided for the mirrored pass
+    // flip culling-sensitive faces to double-sided for the mirrored pass, and
+    // hide noReflect objects (the grass carpet) so the tree mirrors against the
+    // sky instead of being buried in a sea of reflected grass.
     const restore = [];
+    const hiddenR = [];
     this.mesh.visible = false;
     scene.traverse((o) => {
+      if (o.userData && o.userData.noReflect && o.visible) {
+        hiddenR.push(o);
+        o.visible = false;
+      }
       if (o.isMesh && o.material && o.material.side !== THREE.DoubleSide) {
         restore.push([o.material, o.material.side]);
         o.material.side = THREE.DoubleSide;
@@ -166,6 +173,7 @@ export class Water {
     renderer.render(scene, cam);
 
     restore.forEach(([mat, side]) => (mat.side = side));
+    hiddenR.forEach((o) => (o.visible = true));
     this.mesh.visible = true;
   }
 }

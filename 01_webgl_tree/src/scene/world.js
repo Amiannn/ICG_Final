@@ -3,6 +3,8 @@ import { toonMaterial } from "../materials.js";
 import { makeTree } from "./tree.js";
 import { makeGrass } from "./grass.js";
 import { Water } from "./water.js";
+import { makeAnimals } from "./animals.js";
+import { makeBirds } from "../effects/birds.js";
 
 // Builds the whole diorama and returns handles the main loop needs.
 export function buildWorld(scene) {
@@ -38,8 +40,17 @@ export function buildWorld(scene) {
     scene.add(hill);
   }
 
-  // water
-  const water = new Water({ width: 7.5, depth: 5.2, y: 0.06, center: new THREE.Vector3(-4.5, 0, -2.2) });
+  // water — a large foreground lake. With the iso/orthographic camera a tall
+  // tree's mirror image streaks far toward the camera (along world x−z ≈ const),
+  // so the lake must be big and reach forward to actually catch the trunk+canopy
+  // reflection. The cedar sits at the lake's back shore. Max reflectance for a
+  // clear, legible mirror that morphs together with the tree in Growth mode.
+  // A small pond set just IN FRONT of the cedar (toward the camera), with the
+  // tree on its back shore. The iso camera makes a tree mirror toward +x/+z
+  // along world x−z ≈ const, so the pond sits on that streak; with the grass
+  // excluded from the mirror the cedar reflects clearly against the sky.
+  const water = new Water({ width: 7, depth: 5.5, y: 0.06, center: new THREE.Vector3(4.7, 0, 3.4) });
+  water.material.uniforms.uReflectStrength.value = 0.9;
   scene.add(water.mesh);
 
   // faceted rocks scattered around and ringing the scene (like the reference)
@@ -86,9 +97,17 @@ export function buildWorld(scene) {
       { minX: 0.6, maxX: 4.6, minZ: -0.8, maxZ: 3.2 }, // big cedar base
     ],
   });
+  grass.userData.noReflect = true; // keep the grass carpet out of the water mirror
   scene.add(grass);
 
-  return { water, tree, grass, ground };
+  // wildlife — barnyard animals on the meadow + a flock of birds (shown only on
+  // clear sunny days; the main loop hides them at night and in the rain)
+  const animals = makeAnimals();
+  scene.add(animals.group);
+  const birds = makeBirds();
+  scene.add(birds.group);
+
+  return { water, tree, grass, ground, animals, birds };
 }
 
 function addFlower(scene, x, z, bloomMat, scale, stemMat) {
