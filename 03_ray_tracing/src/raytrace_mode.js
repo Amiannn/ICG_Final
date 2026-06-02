@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { WebGLPathTracer } from "three-gpu-pathtracer";
+import { GenerateMeshBVHWorker } from "three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js";
 
 // 03 · Path-traced view of the Pixel Bonsai scene.
 //
@@ -39,6 +40,7 @@ export const raytraceMode = {
 
       perspCam: null,
       pathTracer: null,
+      bvhWorker: null,
       ready: false,
       lastTargetWorld: new THREE.Vector3(),
       lastEyeWorld: new THREE.Vector3(),
@@ -70,7 +72,7 @@ export const raytraceMode = {
         map: m.map ?? null,
         transparent: !!m.transparent,
         alphaTest: m.alphaTest ?? 0,
-        side: m.side ?? THREE.FrontSide,
+        side: THREE.DoubleSide, // path tracer renders single-sided back-faces as black; LatheGeometry core normals point inward, so force double-sided
         roughness: 0.85,
         metalness: 0.0,
       });
@@ -101,7 +103,15 @@ export const raytraceMode = {
     tracer.renderToCanvas = true;
     _state.pathTracer = tracer;
 
-    // setScene is async-friendly — block by ignoring renderSample until ready.
+    // Build the BVH on a web worker so switching into this mode doesn't freeze
+    // the tab. setSceneAsync routes through generateAsync, which requires a BVH
+    // worker registered via setBVHWorker (else it throws). GenerateMeshBVHWorker
+    // is the single-worker variant — no SharedArrayBuffer / cross-origin
+    // isolation needed, unlike ParallelMeshBVHWorker.
+    const bvhWorker = new GenerateMeshBVHWorker();
+    _state.bvhWorker = bvhWorker;
+    tracer.setBVHWorker(bvhWorker);
+
     const p = tracer.setSceneAsync(scene, persp);
     if (p && typeof p.then === "function") {
       p.then(() => {
@@ -127,7 +137,22 @@ export const raytraceMode = {
     if (!_state) return;
     const { renderer } = ctx;
 
-    if (_state.pathTracer) _state.pathTracer.dispose?.();
+    // three-gpu-pathtracer@0.0.23 has a bug: dispose() reads this._renderQuad,
+    // which is never assigned (the field is named this._quad), so the call
+    // always throws. Try the official dispose, then fall back to cleaning up
+    // the resources it intended to free using the real field names.
+    if (_state.pathTracer) {
+      try {
+        _state.pathTracer.dispose();
+      } catch {
+        _state.pathTracer._quad?.dispose?.();
+        _state.pathTracer._quad?.material?.dispose?.();
+        _state.pathTracer._pathTracer?.dispose?.();
+      }
+    }
+
+    // Terminate the BVH worker so we don't leak a worker thread per mode switch.
+    if (_state.bvhWorker) _state.bvhWorker.dispose?.();
 
     for (const obj of _state.hidden) obj.visible = true;
     for (const { obj, original } of _state.matSwap) {

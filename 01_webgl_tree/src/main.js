@@ -11,7 +11,7 @@ import { growthMode } from "./modes/growth_stub.js";
 import { raytraceMode } from "../../03_ray_tracing/src/raytrace_mode.js";
 
 const canvas = document.querySelector("#scene");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(1);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;

@@ -27,7 +27,17 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["three", "three-gpu-pathtracer", "three-mesh-bvh"],
+    // three-mesh-bvh ships web workers that do
+    //   new Worker(new URL("./xxx.worker.js", import.meta.url), { type: "module" })
+    // Pre-bundling it into .vite/deps breaks that relative worker URL, so the
+    // worker fails to load ("GenerateMeshBVHWorker: undefined"). Excluding it
+    // (and three-gpu-pathtracer, which depends on it) serves both from source
+    // so the URL resolves and they share a single three-mesh-bvh instance.
+    include: ["three"],
+    exclude: ["three-gpu-pathtracer", "three-mesh-bvh"],
   },
+  // Emit workers as ES modules (needed for `new Worker(url, { type: "module" })`
+  // to work in the production build, not just dev).
+  worker: { format: "es" },
   build: { target: "es2020", outDir: "dist" },
 });
