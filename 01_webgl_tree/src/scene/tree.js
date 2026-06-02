@@ -166,7 +166,8 @@ export function makeTree(rng = mulberry32(11), S = 1.5) {
       const rr = R * (0.28 + 0.72 * t);
       const x = Math.cos(ang) * rr;
       const z = Math.sin(ang) * rr;
-      const droop = Math.pow(rr / R, 1.4) * skirtDroop;
+      // top skirt has R=0 (shelfR(1)=0) -> rr/R is 0/0=NaN; collapse droop to 0
+      const droop = R > 0 ? Math.pow(rr / R, 1.4) * skirtDroop : 0;
       const py = y - droop + (rng() - 0.5) * 0.12 * S;
 
       const size = THREE.MathUtils.lerp(1.05, 0.5, f) * S * (0.85 + rng() * 0.35);

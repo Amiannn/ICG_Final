@@ -35,7 +35,7 @@ const PERSP_DIST_SCALE = 2.0; // pull eye back so the narrow FOV roughly matches
 // Sky / ground colours for the IBL gradient (replaces the dropped HemisphereLight).
 const ENV_SKY_COLOR = 0xbfe0df; // palette.skyDay
 const ENV_GROUND_COLOR = 0x6f8a52; // hemisphere groundColor (grassy fill)
-const ENV_INTENSITY = 0.55; // keep the sun dominant; env is fill + GI
+const ENV_INTENSITY = 1.0; // fill + GI; replaces the dropped HemisphereLight (intensity 1.3), so vertical tree surfaces aren't left near-black
 const SURFACE_ROUGHNESS = 0.7; // a touch glossy so the env actually reflects (sheen / RT cue)
 
 let _state = null;

@@ -52,12 +52,21 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
 
   let vi = 0; // vertex cursor
   let ii = 0; // index cursor
+  let skipped = 0; // degenerate (non-finite) instances dropped
 
   for (let i = 0; i < count; i++) {
     inst.getMatrixAt(i, _mat);
     _pos.setFromMatrixPosition(_mat);
     const sx = _vecLen(_mat.elements, 0); // length of basis column 0
     const sy = _vecLen(_mat.elements, 4); // length of basis column 1
+
+    // Fail soft at this boundary: a single NaN/Inf instance matrix would
+    // poison the whole baked geometry and make the path tracer's
+    // computeBoundingSphere() return a NaN radius. Drop it and warn instead.
+    if (!_isFinite3(_pos) || !Number.isFinite(sx) || !Number.isFinite(sy)) {
+      skipped++;
+      continue;
+    }
 
     if (inst.instanceColor) _col.fromArray(inst.instanceColor.array, i * 3);
     else _col.set(0xffffff);
@@ -89,12 +98,21 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8 } = {}) {
     }
   }
 
+  if (skipped > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `mergeBillboardsToMesh: skipped ${skipped}/${count} instances with non-finite transforms`,
+    );
+  }
+
+  // Trim to the vertices/indices actually written (skipped instances leave
+  // unused tail slots in the preallocated buffers).
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  geo.setAttribute("position", new THREE.BufferAttribute(positions.subarray(0, vi * 3), 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals.subarray(0, vi * 3), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs.subarray(0, vi * 2), 2));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors.subarray(0, vi * 3), 3));
+  geo.setIndex(new THREE.BufferAttribute(indices.subarray(0, ii), 1));
 
   const mat = new THREE.MeshStandardMaterial({
     map, // original alpha texture (leaf/blade shape + colour)
@@ -118,4 +136,8 @@ function _vecLen(e, col) {
     y = e[col + 1],
     z = e[col + 2];
   return Math.sqrt(x * x + y * y + z * z);
+}
+
+function _isFinite3(v) {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 }

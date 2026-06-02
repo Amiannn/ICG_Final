@@ -15,6 +15,11 @@ import * as THREE from "three";
 // tracer's soft shadows, ambient occlusion and GI colour bleed.
 
 const CEL_BANDS = 5; // luminance bands; ~matches the 4-stop toon ramp + a highlight
+// Lifted shadow floor (mirrors the real-time toon ramp, whose darkest stop is a
+// light grey-green #8a9c80, not black). Without it the lowest band rounds to 0
+// and dim, env-only surfaces (the tree's camera-facing side) crush to pure
+// black instead of reading as dark green/brown.
+const CEL_SHADOW_FLOOR = 0.22;
 
 const VERT = /* glsl */ `
   varying vec2 vUv;
@@ -34,6 +39,7 @@ const EDGE_FRAG = /* glsl */ `
   uniform float uFar;
   uniform float uOutline;     // outline strength (0 = skip the edge work)
   uniform float uBands;
+  uniform float uShadowFloor; // darkest cel band (toon shadow colour, never 0)
   uniform vec3 uInk;
 
   // Narkowicz 2015 ACES filmic approximation: linear HDR -> display [0,1].
@@ -54,8 +60,10 @@ const EDGE_FRAG = /* glsl */ `
 
     // Cel ramp: quantise luminance into discrete bands, preserve hue. This is
     // the post-process stand-in for the real-time MeshToonMaterial gradient.
+    // Floor the darkest band so dim surfaces read as a dark tint of their own
+    // hue (toon shadow) rather than rounding to pure black.
     float l = dot(col, vec3(0.299, 0.587, 0.114));
-    float q = floor(l * uBands + 0.5) / uBands;
+    float q = max(floor(l * uBands + 0.5) / uBands, uShadowFloor);
     col *= q / max(l, 1e-4);
 
     if (uOutline > 0.001) {
@@ -165,6 +173,7 @@ export class PixelArtPost {
         uFar: { value: 200 },
         uOutline: { value: 0 },
         uBands: { value: CEL_BANDS },
+        uShadowFloor: { value: CEL_SHADOW_FLOOR },
         uInk: { value: new THREE.Color(0x222a26) },
       },
     });
