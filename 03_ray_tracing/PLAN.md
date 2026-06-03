@@ -458,6 +458,11 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
   green-by-height 漸層(dark base→warm crown)。取代醜的 billboard 卡片,像真針葉樹。
   (演進:圓 icosa clump→花椰菜;拉長 icosa→兩端圓的「豆子」;最後 pointed cone 短+細+密 才像針葉。)
 - 其他優化:grass card 縮短(sizeScale 0.72)當低草坪;bark 調冷灰(少橘)。
+- **銳利度**:`renderScale 0.75→1.0`(全解析,0.75 看起來糊)、DoF 調到 `fStop 0.07`(幾乎全清,
+  只遠景微柔)。
+- **水面鏡面**:dielectric(ior)從俯角只反射 ~10% → 像死板 teal 色塊。改 **metallic mirror**
+  (`metalness 0.92, roughness 0.02, color 0x8fc0cc, clearcoat 1`)讓反射主導 → 亮鏡面湖;
+  env 太陽盤 `9→16` 給水面 sun glint。(非物理,但這是要的亮鏡面湖。)
 - **坑(重要)**:three-gpu-pathtracer 場景 merge 的 color attribute 是 **itemSize 4 (RGBA)**;
   clump 若用 itemSize 3 會 mismatch → 葉子洗成白色。必須寫 RGBA(alpha=1)。
 - **DoF 調弱**:`fStop 0.008→0.03`(使用者嫌太糊,改成只有遠近輕微分離)。

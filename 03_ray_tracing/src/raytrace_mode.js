@@ -152,13 +152,18 @@ export const raytraceMode = {
         world.tree.position.z + (eye.z / hlen) * WATER_FOREGROUND_DIST,
       );
 
+      // A real dielectric water surface only reflects ~2-10% looking down, so
+      // the rest is the dull body colour and it never reads as a mirror from
+      // this top-ish angle. A still lake reads "mirror" when the REFLECTION
+      // dominates, so we make it a tinted near-metal: reflection-dominant,
+      // tinted teal, with a clearcoat for a wet sheen. Unphysical, but it's the
+      // bright mirror lake the look calls for (and what the real-time fake fakes).
       const waterMat = new THREE.MeshPhysicalMaterial({
-        color: 0x1d4e5a, // deep blue-teal water
-        roughness: 0.04, // sharp mirror reflection
-        metalness: 0.0,
-        ior: 1.33, // water — Fresnel reflects strongly at grazing angles
-        clearcoat: 1.0, // wet glossy top layer
-        clearcoatRoughness: 0.06,
+        color: 0x8fc0cc, // tints the (dominant) reflection a cool teal
+        roughness: 0.02, // crisp mirror
+        metalness: 0.92, // reflection-dominant -> sky + tree mirror clearly
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.0,
         side: THREE.DoubleSide,
       });
       _state.matSwap.push({ obj: wm, original: wm.material });
@@ -265,7 +270,7 @@ export const raytraceMode = {
     const env = makeSkyEnv(ptSunDir, {
       skyIntensity: 0.65,
       sunColor: [1.0, 0.86, 0.6],
-      sunIntensity: 9.0, // faint glint in reflections only — the directional light is the key (avoid double-lighting diffuse)
+      sunIntensity: 16.0, // bright sun glint in the pond/glossy reflections — directional light stays the diffuse key
       sunAngularDeg: 2.0,
       zenith: [0.09, 0.24, 0.58],
       horizon: [0.52, 0.62, 0.74],
@@ -304,7 +309,7 @@ export const raytraceMode = {
     // scales the aperture by bokehSize*1e-3 (assumes a mm-scale scene); our scene
     // is ~40 units, so the f-stop is unusually small. f/0.03 ≈ light separation;
     // 0.008 was strong macro blur.
-    persp.fStop = 0.03;
+    persp.fStop = 0.07; // very subtle DoF — only the far background softens slightly
     persp.apertureBlades = 6;
     persp.focusDistance = 40; // refined to the eye→tree distance each frame in _syncCamera
     _state.perspCam = persp;
@@ -320,7 +325,7 @@ export const raytraceMode = {
     const tracer = new WebGLPathTracer(renderer);
     tracer.bounces = 5;
     tracer.multipleImportanceSampling = true;
-    tracer.renderScale = 0.75;
+    tracer.renderScale = 1.0; // full-res for a crisp hero (the 0.75 scale read as soft)
     tracer.tiles.set(3, 3);
     tracer.renderToCanvas = true;
     tracer.filterGlossyFactor = 0.5; // clamp glossy fireflies -> faster perceptual convergence
