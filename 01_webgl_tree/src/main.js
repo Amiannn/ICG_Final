@@ -4,6 +4,8 @@ import { PixelCamera } from "./camera.js";
 import { Lighting } from "./lighting.js";
 import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
+import { makeRainSound } from "./effects/rainsound.js";
+import { makeRainSplash } from "./effects/rainsplash.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
@@ -28,6 +30,9 @@ const world = buildWorld(scene);
 const dust = new DustParticles();
 scene.add(dust.points);
 const pipeline = new Pipeline(renderer, pixel);
+const rainSound = makeRainSound();
+const rainSplash = makeRainSplash();
+scene.add(rainSplash.mesh);
 
 // Shared context passed to every mode plugin (see CONTRIBUTING.md §5).
 const ctx = {
@@ -40,6 +45,7 @@ const ctx = {
   tree: world.tree,
   world,
   dust,
+  rainSplash,
   pipeline,
   settings,
 };
@@ -50,6 +56,13 @@ currentMode.init(ctx);
 
 initUI(onSettingChange, switchMode);
 applyAllSettings();
+
+// debug/scrub hook: freeze the cycle and set a specific time-of-day (0..1)
+window.__tod = (t) => {
+  settings.cycle = false;
+  lighting.setTimeOfDay(t);
+  pipeline.composite.uniforms.uNight.value = 1 - lighting.dayness;
+};
 
 window.addEventListener("resize", resize);
 resize();
@@ -93,9 +106,12 @@ function onSettingChange(key) {
   if (key === "verticalResolution") {
     resize();
   } else if (key === "night") {
-    lighting.setNight(settings.night);
+    if (!settings.cycle) lighting.setNight(settings.night); // cycle overrides the static toggle
   } else if (key === "rain") {
     lighting.setRain(settings.rain); // rain ⇒ overcast (no sun)
+    rainSound.set(settings.rain);    // procedural rain ambience on/off
+  } else if (key === "cycle") {
+    if (!settings.cycle) lighting.setNight(settings.night); // turning the cycle off restores static day/night
   }
   applyDynamicSettings();
 }
@@ -106,6 +122,9 @@ function applyDynamicSettings() {
   // no sun shafts in the rain (overcast)
   pipeline.godray.uniforms.uEnabled.value = settings.godrays && !settings.rain ? 1 : 0;
   dust.points.visible = settings.dust;
+  // rain impact: pond ripples + splash rings on the ground
+  world.water.material.uniforms.uRain.value = settings.rain ? 1 : 0;
+  rainSplash.setRain(settings.rain);
   pipeline.composite.uniforms.uRain.value = settings.rain ? 1 : 0;
   pipeline.composite.uniforms.uGrain.value = settings.grain ? 1 : 0;
   pipeline.composite.uniforms.uNight.value = settings.night ? 1 : 0;

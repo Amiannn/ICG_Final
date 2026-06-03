@@ -104,6 +104,13 @@ const PLACEMENTS = [
   ["sheep", 3.6, 8.0, 1.45, 1.1, 0.22],
 ];
 
+const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const smoother = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * x * (x * (x * 6 - 15) + 10); };
+
+const ENTRY_DIST = 9;    // how far off-screen an absent animal waits (world units)
+const ENTER_RATE = 0.16; // linear presence rate (eased) ≈6s for an unhurried stroll-in
+const TURN_RATE = 2.4;   // max heading change (rad/s) → no snap-turns
+
 export function makeAnimals() {
   const group = new THREE.Group();
   const anims = [];
@@ -111,38 +118,71 @@ export function makeAnimals() {
     const a = BUILDERS[type]();
     a.group.scale.setScalar(sc);
     group.add(a.group);
+    // entry direction: a unit vector pointing from the scene centre out past the
+    // spawn point, so an absent animal waits off-screen along that ray and walks
+    // straight in toward its meadow spot.
+    const len = Math.hypot(x, z) || 1;
+    const ex = x / len, ez = z / len;
     anims.push({
       ...a,
       sx: x, sz: z,
+      ex, ez,
       wr: wr, wrz: wr * 0.7,
       spd: spd,
       phase: i * 1.9,
       stride: 7 + (i % 3),     // leg cadence
       strideAmp: type === "dog" ? 0.7 : 0.5,
+      baseScale: sc,
+      threshold: 0.12 + 0.72 * (i / (PLACEMENTS.length - 1)), // staggered with growth
+      l: 0,                    // linear presence (eased into p)
+      pPrev: 0,                // last frame's eased presence (for slide velocity)
+      heading: Math.atan2(ez, -ex), // start facing inward (the way it will walk in)
     });
   });
   group.userData.noReflect = true; // keep barnyard out of the small pond mirror
 
-  function update(t) {
+  let lastT = null;
+
+  // active = clear daylight (else they walk back off-screen); frac = growth reveal
+  // (each animal's staggered target presence), 1 in real-time mode.
+  function update(t, active = true, frac = 1) {
+    const dt = lastT == null ? 0 : Math.min(0.05, Math.max(0, t - lastT));
+    lastT = t;
     for (const a of anims) {
+      // ease presence toward its target so animals accelerate in / decelerate to a
+      // stop — they walk in and settle, never pop or jerk.
+      const target = active ? _ss(a.threshold - 0.16, a.threshold + 0.02, frac) : 0;
+      a.l += Math.max(-ENTER_RATE * dt, Math.min(ENTER_RATE * dt, target - a.l));
+      const p = smoother(a.l);
+      a.group.visible = p > 0.003;
+      if (!a.group.visible) { a.pPrev = p; continue; }
+
       const ang = t * a.spd + a.phase;
-      // wander along a gentle ellipse around the spawn point
+      // wander along a gentle ellipse around the spawn point …
       const x = a.sx + Math.cos(ang) * a.wr;
       const z = a.sz + Math.sin(ang) * a.wrz;
-      // velocity (tangent) → heading: local +x (the head) faces travel direction
-      const vx = -Math.sin(ang) * a.wr;
-      const vz = Math.cos(ang) * a.wrz;
-      a.group.rotation.y = Math.atan2(-vz, vx);
+      const off = (1 - p) * ENTRY_DIST; // … offset out to the off-screen entry point
+      a.group.position.set(x + a.ex * off, Math.abs(Math.sin(t * a.stride + a.phase)) * 0.04, z + a.ez * off);
+      a.group.scale.setScalar(a.baseScale); // constant size — no pop-in
 
-      // trot: diagonal leg pairs swing in antiphase; body hops gently
+      // heading follows ACTUAL motion (wander tangent + the inward slide), so it
+      // faces the way it is travelling and rotates smoothly as the slide eases out.
+      const vx = -Math.sin(ang) * a.wr - a.ex * ENTRY_DIST * (p - a.pPrev) / (dt || 1);
+      const vz = Math.cos(ang) * a.wrz - a.ez * ENTRY_DIST * (p - a.pPrev) / (dt || 1);
+      a.pPrev = p;
+      const want = Math.atan2(-vz, vx);
+      let d = want - a.heading;
+      d = Math.atan2(Math.sin(d), Math.cos(d));               // shortest angle
+      a.heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, d)); // capped turn
+      a.group.rotation.y = a.heading;
+
+      // trot: diagonal leg pairs swing in antiphase the whole time it is moving
       const swing = Math.sin(t * a.stride + a.phase) * a.strideAmp;
       for (const hip of a.legs) hip.rotation.x = swing * hip.userData.gait;
-      const bob = Math.abs(Math.sin(t * a.stride + a.phase)) * 0.04;
-      a.group.position.set(x, bob, z);
-
       // head bobs as it walks / grazes
       a.head.rotation.x = 0.12 + 0.12 * Math.sin(t * a.stride * 0.5 + a.phase);
     }
   }
+
   return { group, update };
 }

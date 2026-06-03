@@ -57,6 +57,7 @@ export const growthMorphMode = {
     }
     if (this.morph) this.morph.setGrowth(G); // morphTargetInfluences = G
 
+    ctx.growthReveal = G; // grass / flowers / animals / birds fill in with the tree
     realtimeMode.render(ctx, time);
   },
 

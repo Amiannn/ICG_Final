@@ -40,6 +40,12 @@ function makeBird(wingGeo, bodyGeo) {
   return g;
 }
 
+const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const smoother = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * x * (x * (x * 6 - 15) + 10); };
+
+const ENTRY_DIST = 26;   // how far off-screen an absent bird waits
+const ENTER_RATE = 0.2;  // linear presence rate (eased) ≈5s for a graceful glide-in
+
 export function makeBirds(count = 8) {
   const group = new THREE.Group();
   const wingGeo = wingGeometry();
@@ -47,9 +53,11 @@ export function makeBirds(count = 8) {
   const birds = [];
   for (let i = 0; i < count; i++) {
     const b = makeBird(wingGeo, bodyGeo);
-    const sc = 1.1 + 0.5 * ((i * 7) % 3) / 2;
+    const sc = 0.5 + 0.22 * ((i * 7) % 3) / 2; // smaller gulls (≈0.5–0.72)
     b.scale.setScalar(sc);
     group.add(b);
+    // each bird glides in from a different off-screen bearing (golden-angle spread)
+    const bearing = i * 2.39996;
     birds.push({
       mesh: b,
       cx: -3 + (i % 3) * 4,
@@ -60,26 +68,44 @@ export function makeBirds(count = 8) {
       spd: 0.16 + 0.05 * (i % 3),
       phase: i * 1.27,
       flap: 6.5 + (i % 3) * 1.5,
+      ex: Math.cos(bearing), ez: Math.sin(bearing),
+      baseScale: sc,
+      threshold: 0.25 + 0.7 * (i / (count - 1)), // flock fills in as the tree grows
+      l: 0,                                       // linear presence (eased into p)
     });
   }
   group.userData.noReflect = true;
 
-  function update(t) {
+  let lastT = null;
+
+  // active = clear daylight (else they glide back off-screen); frac = growth reveal
+  function update(t, active = true, frac = 1) {
+    const dt = lastT == null ? 0 : Math.min(0.05, Math.max(0, t - lastT));
+    lastT = t;
     for (const b of birds) {
+      const target = active ? _ss(b.threshold - 0.16, b.threshold + 0.02, frac) : 0;
+      b.l += Math.max(-ENTER_RATE * dt, Math.min(ENTER_RATE * dt, target - b.l));
+      const p = smoother(b.l);
+      b.mesh.visible = p > 0.003;
+      if (!b.mesh.visible) continue;
+
+      const off = (1 - p) * ENTRY_DIST;          // slide in from off-screen
       const a = t * b.spd + b.phase;
-      const x = b.cx + Math.cos(a) * b.rx;
-      const z = b.cz + Math.sin(a) * b.rz;
+      const x = b.cx + Math.cos(a) * b.rx + b.ex * off;
+      const z = b.cz + Math.sin(a) * b.rz + b.ez * off;
       const y = b.h + Math.sin(a * 2.0) * 0.7;
       b.mesh.position.set(x, y, z);
       // face direction of travel (tangent of the ellipse, a touch ahead)
       const a2 = a + 0.06;
-      b.mesh.lookAt(b.cx + Math.cos(a2) * b.rx, y, b.cz + Math.sin(a2) * b.rz);
+      b.mesh.lookAt(b.cx + Math.cos(a2) * b.rx + b.ex * off, y, b.cz + Math.sin(a2) * b.rz + b.ez * off);
       // flap around the shallow gull rest pose
       const f = Math.sin(t * b.flap + b.phase) * 0.55;
       const [L, R] = b.mesh.userData.LR;
       L.rotation.z = REST + f;
       R.rotation.z = -(REST + f);
+      b.mesh.scale.setScalar(b.baseScale); // constant size — no pop-in
     }
   }
+
   return { group, update };
 }

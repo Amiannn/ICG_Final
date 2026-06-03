@@ -38,6 +38,8 @@ export class Water {
         uReflectStrength: { value: 0.5 },
         uReflectEnabled: { value: 1 },
         uPlaneSize: { value: new THREE.Vector2(width, depth) },
+        uRain: { value: 0 },
+        uCenter: { value: new THREE.Vector2(center.x, center.z) },
       },
       vertexShader: /* glsl */ `
         attribute float aEdge;   // 1 at pond centre, 0 at the irregular rim
@@ -67,6 +69,30 @@ export class Water {
         uniform float uReflectStrength;
         uniform int uReflectEnabled;
         uniform vec2 uPlaneSize;
+        uniform float uRain;
+        uniform vec2 uCenter;
+
+        // a couple of expanding raindrop rings at pseudo-random spots on the pond
+        float rainRipples(vec2 wpos, out float crest) {
+          crest = 0.0;
+          float total = 0.0;
+          for (int i = 0; i < 5; i++) {
+            float fi = float(i);
+            // a fresh drop site every ~1.1s, jumping around the surface
+            float life = 1.1;
+            float t = uTime / life + fi * 0.41;
+            float k = floor(t);
+            float age = fract(t);                         // 0 → 1 ring lifetime
+            vec2 c = (vec2(fract(sin(k * 12.9 + fi * 7.7) * 43758.5),
+                           fract(sin(k * 78.2 + fi * 3.3) * 12733.1)) - 0.5) * uPlaneSize * 0.8;
+            float d = length(wpos - c);
+            float R = age * 1.6;                          // ring radius grows
+            float ring = smoothstep(0.10, 0.0, abs(d - R)) * (1.0 - age);
+            crest += ring;
+            total += ring;
+          }
+          return total;
+        }
 
         void main() {
           vec2 scroll1 = vec2(0.02, 0.05) * uTime;
@@ -78,18 +104,28 @@ export class Water {
           float lines = wave.r;
           float sparkle = wave.b;
 
+          // rain dimpling the pond: expanding rings perturb the swell + add crests
+          float crest = 0.0;
+          float ripple = 0.0;
+          if (uRain > 0.5) {
+            ripple = rainRipples(vWorld.xz - uCenter, crest);
+            swell = clamp(swell + ripple * 0.5, 0.0, 1.0);
+          }
+
           // base water colour: deep, with crisp crests lightening it
           vec3 col = mix(uDeep, uShallow, 0.35 + swell * 0.4);
           col = mix(col, uShallow, lines * 0.7);
           col += sparkle * 0.25;
 
-          // planar reflection sampled at screen uv, perturbed by the swell
+          // planar reflection sampled at screen uv, perturbed by the swell + ripples
           if (uReflectEnabled == 1) {
             vec2 screenUv = vScreen.xy / vScreen.w * 0.5 + 0.5;
             screenUv += (swell - 0.5) * 0.03;
+            screenUv += crest * 0.02;
             vec3 refl = texture2D(tReflect, screenUv).rgb;
             col = mix(col, refl, uReflectStrength * (0.62 + lines * 0.38));
           }
+          col += crest * 0.18; // bright ripple crests catching the light
 
           // soften the shoreline using the per-vertex edge factor (0 at rim)
           float a = smoothstep(0.0, 0.28, vEdge) * 0.85 + 0.12;
