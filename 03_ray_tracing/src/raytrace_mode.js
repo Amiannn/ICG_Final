@@ -29,8 +29,15 @@ import { mergeBillboardsToMesh } from "./merge_instances.js";
 // We build a temporary telephoto PerspectiveCamera (fov 30°, pulled back
 // along the same eye offset) that approximates the iso framing.
 
-const PERSP_FOV_DEG = 30;
-const PERSP_DIST_SCALE = 2.0; // pull eye back so the narrow FOV roughly matches the ortho extent
+const PERSP_FOV_DEG = 33;
+const PERSP_DIST_SCALE = 2.05; // pull eye back so the narrow FOV roughly matches the ortho extent
+const TARGET_POND_BIAS = 0.16; // shift the look-at slightly toward the pond so the reflective water reads in frame
+
+// Pixel-art outline strength used in path-trace mode when the user hasn't set the
+// outline slider (its global default is 0). The cel-quantise + ink-edge pass is
+// the whole point of the pixel-art register, so default it ON here for character;
+// dragging the slider still overrides, and toggling Outlines off still kills it.
+const PT_OUTLINE_DEFAULT = 1.2;
 
 // Sky / ground colours for the IBL gradient (replaces the dropped HemisphereLight).
 const ENV_SKY_COLOR = 0xbfe0df; // palette.skyDay
@@ -70,16 +77,13 @@ export const raytraceMode = {
       lastEyeWorld: new THREE.Vector3(),
     };
 
-    // 1. Hide every InstancedMesh (grass + tree foliage), the Points dust
-    //    cloud, and the procedural-shader water plane. Custom shaders aren't
-    //    PBR so the path tracer can't see them anyway.
+    // 1. Hide every InstancedMesh (grass + tree foliage) and the Points dust
+    //    cloud — instancing isn't supported (B1) and the dust is a custom shader.
+    //    The water plane is NOT hidden anymore: it gets a real reflective
+    //    material below (see 2b) so the path tracer can render true reflections.
     scene.traverse((obj) => {
       if (!obj.visible) return;
-      const shouldHide =
-        obj.isInstancedMesh ||
-        obj.isPoints ||
-        (world.water && obj === world.water.mesh);
-      if (shouldHide) {
+      if (obj.isInstancedMesh || obj.isPoints) {
         _state.hidden.push(obj);
         obj.visible = false;
       }
@@ -91,13 +95,53 @@ export const raytraceMode = {
     //     inherits the same world transform.
     for (const obj of _state.hidden) {
       if (!obj.isInstancedMesh || !obj.material || !obj.material.map || !obj.parent) continue;
-      // Tree foliage gets the solid + emissive-translucency canopy treatment;
-      // the ground grass stays a cheap alpha-cutout cross (lit fine flat on the
-      // ground, and seeing the ground through blade gaps is correct).
-      const foliage = obj !== world.grass;
-      const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, foliage });
-      obj.parent.add(mesh);
-      _state.merged.push({ mesh, parent: obj.parent });
+      if (obj === world.grass) {
+        // Ground grass: a single cheap alpha-cutout cross (lit fine flat on the
+        // ground, and seeing the ground through blade gaps is correct).
+        const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, foliage: false });
+        obj.parent.add(mesh);
+        _state.merged.push({ mesh, parent: obj.parent });
+        continue;
+      }
+      // Tree canopy: two layers. A solid inner filler sized just inside the
+      // leaves so see-through gaps reveal soft shadowed green (never black), plus
+      // a leafy alpha-cutout outer shell that restores the sprig silhouette and
+      // tier separation of the real-time view.
+      const inner = mergeBillboardsToMesh(obj, {
+        roughness: SURFACE_ROUGHNESS,
+        foliage: true,
+        cutout: false,
+        sizeScale: 1.15,
+      });
+      const outer = mergeBillboardsToMesh(obj, {
+        roughness: SURFACE_ROUGHNESS,
+        foliage: true,
+        cutout: true,
+        sizeScale: 1.5,
+      });
+      obj.parent.add(inner, outer);
+      _state.merged.push({ mesh: inner, parent: obj.parent }, { mesh: outer, parent: obj.parent });
+    }
+
+    // 1c. Path-traced water. The real-time pond is a custom planar-reflection
+    //     shader; here we hand the path tracer a near-mirror MeshPhysicalMaterial
+    //     so it computes *true* reflections of the sky env + tree (the showcase
+    //     the real-time fake approximates). Opaque + low roughness reads as a
+    //     calm reflective pond; we don't add transmission because there is no
+    //     pond-floor geometry, so a see-through surface would reveal the world
+    //     background like a hole. Swapped before the generic pass below so that
+    //     pass skips it; restored from matSwap on dispose.
+    if (world.water && world.water.mesh) {
+      const wm = world.water.mesh;
+      const waterMat = new THREE.MeshPhysicalMaterial({
+        color: 0x35787f, // deep teal tint where the dielectric isn't reflecting
+        roughness: 0.07, // near-mirror; a touch of roughness tames fireflies
+        metalness: 0.0,
+        ior: 1.33, // water — Fresnel reflects strongly at the grazing pond angle
+        side: THREE.DoubleSide,
+      });
+      _state.matSwap.push({ obj: wm, original: wm.material });
+      wm.material = waterMat;
     }
 
     // 2. Swap MeshToonMaterial / ShaderMaterial → MeshStandardMaterial.
@@ -225,7 +269,11 @@ export const raytraceMode = {
         const displayW = Math.max(1, Math.round(displayH * (bufW / bufH)));
         _state.post.setSize(displayW, displayH);
 
-        const outline = settings.outlines ? settings.outlineStrength : 0;
+        const outline = settings.outlines
+          ? settings.outlineStrength > 0
+            ? settings.outlineStrength
+            : PT_OUTLINE_DEFAULT
+          : 0;
         _state.post.render({
           colorTex: _state.pathTracer.target.texture,
           scene,
@@ -359,8 +407,15 @@ export const raytraceMode = {
 
   _syncCamera(ctx) {
     const persp = _state.perspCam;
-    const target = ctx.pixel.desiredTarget;
     const eyeOffset = ctx.pixel.eyeOffset;
+
+    // Pan the look-at slightly toward the pond so the reflective water reads in
+    // frame (the tree alone leaves it cut off at the edge). This translates both
+    // eye and target by the same delta, so it's a pan, not a rotation.
+    const target = ctx.pixel.desiredTarget.clone();
+    if (ctx.world && ctx.world.water) {
+      target.lerp(ctx.world.water.center, TARGET_POND_BIAS);
+    }
 
     const eye = eyeOffset.clone().normalize().multiplyScalar(eyeOffset.length() * PERSP_DIST_SCALE);
     const eyePos = target.clone().add(eye);

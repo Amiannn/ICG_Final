@@ -55,20 +55,38 @@ const CORNERS = [
 // 0x33522d); under real GI that base reads too dark, so we nudge every foliage
 // colour toward this lush green to match the real-time view's brightness.
 const _LIFT = new THREE.Color(0x9ccc6a);
-const FOLIAGE_LIFT = 0.22;
+const FOLIAGE_LIFT = 0.1; // gentle: keep tree.js's dark-base -> warm-crown gradient
+
+// Foliage shading-normal blend: lean the per-card normal outward from the trunk
+// axis (radial) while keeping a strong up component, so the canopy shades as a
+// rounded 3D form (bright sun-side, dark shadow-side) instead of a flat mass.
+const NORMAL_UP = 0.7;
+const NORMAL_RADIAL = 0.72;
 
 // Build a static Mesh (crossed quads) reproducing an InstancedMesh of billboards.
 // The result lives in the same local space as `inst`, so parent it to inst.parent.
-export function mergeBillboardsToMesh(inst, { roughness = 0.8, foliage = false } = {}) {
+//
+//   foliage   – tree canopy treatment: 3-quad asterisk, radial form normals,
+//               lifted greens + emissive translucency floor. Else grass: 2-quad
+//               cross, world-up normals, plain.
+//   cutout    – keep the alpha texture as an alphaTest silhouette (leafy gaps).
+//               When false the quads are SOLID (no see-through). The canopy is
+//               built as TWO layers: a solid inner filler (cutout:false) so gaps
+//               never reveal black, and a leafy outer shell (cutout:true) for the
+//               sprig silhouette + tier separation. Grass is a single cutout pass.
+//   sizeScale – quad size multiplier (lets the inner filler sit just inside the
+//               outer leaves).
+export function mergeBillboardsToMesh(
+  inst,
+  { roughness = 0.8, foliage = false, cutout = !foliage, sizeScale } = {},
+) {
   const count = inst.count;
   const map = inst.material.map ?? null;
   const baseColor = inst.material.color ? inst.material.color.clone() : new THREE.Color(0xffffff);
 
-  // Foliage uses the denser 3-quad asterisk + slightly enlarged quads so the
-  // crossed planes overlap into a filled canopy; grass keeps the cheap 2-quad
-  // cross at native size.
+  // Foliage uses the denser 3-quad asterisk; grass keeps the cheap 2-quad cross.
   const frames = foliage ? FOLIAGE_FRAMES : FRAMES;
-  const sizeScale = foliage ? 1.4 : 1.0;
+  if (sizeScale == null) sizeScale = foliage ? 1.4 : 1.0;
 
   const vertsPerInst = frames.length * 4;
   const trisPerInst = frames.length * 2;
@@ -101,6 +119,29 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, foliage = false }
     _col.multiply(baseColor);
     if (foliage) _col.lerp(_LIFT, FOLIAGE_LIFT);
 
+    // Per-instance shading normal. Grass stays world-up (flat ground lighting).
+    // Foliage gets a normal that leans OUTWARD from the trunk axis (radial) +
+    // up, so the canopy shades like a rounded 3D form: the sun-facing side reads
+    // bright and the shadow side reads dark, instead of every card sharing the
+    // same world-up normal and rendering as one flat green mass. The instance
+    // position is in the tree group's local space, centred on the trunk, so the
+    // radial direction is just normalize(x, 0, z).
+    let nx = 0,
+      ny = 1,
+      nz = 0;
+    if (foliage) {
+      const rl = Math.hypot(_pos.x, _pos.z);
+      if (rl > 1e-3) {
+        nx = (_pos.x / rl) * NORMAL_RADIAL;
+        ny = NORMAL_UP;
+        nz = (_pos.z / rl) * NORMAL_RADIAL;
+        const ln = Math.hypot(nx, ny, nz) || 1;
+        nx /= ln;
+        ny /= ln;
+        nz /= ln;
+      }
+    }
+
     const ssx = sx * sizeScale;
     const ssy = sy * sizeScale;
     for (const f of frames) {
@@ -110,15 +151,12 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, foliage = false }
         positions[p3 + 0] = _pos.x + c.r * ssx * f.right[0] + c.u * ssy * f.up[0];
         positions[p3 + 1] = _pos.y + c.r * ssx * f.right[1] + c.u * ssy * f.up[1];
         positions[p3 + 2] = _pos.z + c.r * ssx * f.right[2] + c.u * ssy * f.up[2];
-        // Shade normal points world-up, NOT along the quad face. This mirrors
-        // the real-time billboard material (materials.js flattens the normal to
-        // world-up) so foliage is lit evenly by the sky/sun like the ground.
-        // The quads stay vertical for silhouette + shadow casting; only the
-        // lighting normal is lifted. Without this, sideways-facing normals get
-        // almost no light under the overhead sun and the canopy renders black.
-        normals[p3 + 0] = 0;
-        normals[p3 + 1] = 1;
-        normals[p3 + 2] = 0;
+        // Shade normal (per-instance, computed above) — radial-outward+up for
+        // foliage form shading, world-up for flat grass. NOT the quad face
+        // normal; the quads stay vertical only for silhouette + shadow casting.
+        normals[p3 + 0] = nx;
+        normals[p3 + 1] = ny;
+        normals[p3 + 2] = nz;
         colors[p3 + 0] = _col.r;
         colors[p3 + 1] = _col.g;
         colors[p3 + 2] = _col.b;
@@ -152,54 +190,46 @@ export function mergeBillboardsToMesh(inst, { roughness = 0.8, foliage = false }
   geo.setIndex(new THREE.BufferAttribute(indices.subarray(0, ii), 1));
 
   // The path tracer renders true GI, so foliage can't lean on the real-time toon
-  // ramp's lifted shadow floor to stay bright. Two foliage-specific problems had
-  // to be solved here (see PLAN §9.2 item 1):
+  // ramp's lifted shadow floor to stay bright. Material choices (see PLAN §9.2):
   //
-  //   1. See-through-to-black. The sprig texture is a sparse feathery cutout
-  //      (alphaTest 0.5). Under real GI, camera rays thread through the gaps and
-  //      hit the dark self-shadowed canopy interior + brown core, so the canopy
-  //      read as a near-black silhouette. Camera-facing real-time billboards
-  //      never expose this. Fix: drop the alpha cutout for foliage and bake SOLID
-  //      crossed quads — the 3-quad asterisk then fills into an opaque canopy with
-  //      no see-through gaps. The per-instance vertex-colour gradient (dark base
-  //      -> warm crown, baked from tree.js) supplies the leaf colour in place of
-  //      the texture; the fine leaf silhouette is below the pixel-art resolution
-  //      anyway and the outline pass re-stylises the mass.
+  //   • cutout layer keeps the sprig alpha as an alphaTest silhouette so the leaf
+  //     shapes + gaps survive (the "leafy / tier separation" look). On its own a
+  //     cutout canopy reads near-black: under real GI camera rays thread through
+  //     the sparse feathery gaps and hit the dark self-shadowed interior + brown
+  //     core. The inner SOLID filler layer (cutout:false) backs it so those gaps
+  //     reveal soft shadowed green instead of black.
   //
-  //   2. Translucency. Real leaves transmit light and read bright even in shadow.
-  //      MeshPhysicalMaterial transmission was tried (transmission 0.6 / thickness
-  //      0.4) but compounded Beer-Lambert absorption across the many overlapping
-  //      cards into an even darker canopy. Instead we approximate Habel 2007's
-  //      real-time leaf translucency the way that paper does — as an ADDITIVE
-  //      self-illumination term (emissive). It lifts shadowed inner foliage to a
-  //      soft green glow with no darkening, and the path tracer adds emission
-  //      directly at the surface (not modulated by albedo: see get_surface_record
-  //      — emission = emissiveIntensity * emissive), so stacked cards can't absorb
-  //      it away. roughness 1.0 keeps the leaves fully diffuse so the bluish sky
-  //      environment doesn't cast a purple specular sheen on the dark greens.
+  //   • Translucency. Real leaves transmit light and read bright even in shadow.
+  //     MeshPhysicalMaterial transmission was tried but compounded Beer-Lambert
+  //     absorption across the overlapping cards into an even darker canopy.
+  //     Instead we approximate Habel 2007's real-time leaf translucency the way
+  //     that paper does — as an ADDITIVE self-illumination term (a low emissive
+  //     floor). The path tracer adds emission at the surface un-modulated by
+  //     albedo (get_surface_record: emission = emissiveIntensity * emissive), so
+  //     stacked cards can't absorb it away. It's kept LOW so it only lifts the
+  //     deepest shadows out of black without flattening the radial form shading.
+  //     roughness 1.0 keeps leaves diffuse so the bluish sky env can't cast a
+  //     purple specular sheen on the dark greens.
   //
-  // Grass keeps the cheap map + alphaTest cutout: it sits flat on the ground, is
-  // lit fine, and seeing the ground through blade gaps is correct.
-  const mat = foliage
-    ? new THREE.MeshStandardMaterial({
-        color: 0xffffff, // tint comes from the baked vertex colours
-        vertexColors: true,
-        side: THREE.DoubleSide,
-        roughness: 1.0,
-        metalness: 0.0,
-        emissive: new THREE.Color(0x4c7d33), // Habel-style additive translucency glow floor
-        emissiveIntensity: 0.7,
-      })
-    : new THREE.MeshStandardMaterial({
-        map, // alpha texture (blade shape + colour)
-        color: 0xffffff,
-        vertexColors: true,
-        alphaTest: 0.5, // cutout silhouette (matches the billboard material)
-        transparent: false,
-        side: THREE.DoubleSide,
-        roughness,
-        metalness: 0.0,
-      });
+  // Grass is a single cutout pass: it sits flat on the ground, is lit fine, and
+  // seeing the ground through blade gaps is correct.
+  const matOpts = {
+    color: 0xffffff, // tint comes from the baked vertex colours
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    roughness: foliage ? 1.0 : roughness,
+    metalness: 0.0,
+  };
+  if (cutout) {
+    matOpts.map = map; // alpha texture (leaf/blade shape + colour)
+    matOpts.alphaTest = 0.5; // cutout silhouette (matches the billboard material)
+    matOpts.transparent = false;
+  }
+  if (foliage) {
+    matOpts.emissive = new THREE.Color(0x3c6b28); // Habel-style translucency floor
+    matOpts.emissiveIntensity = 0.3;
+  }
+  const mat = new THREE.MeshStandardMaterial(matOpts);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;

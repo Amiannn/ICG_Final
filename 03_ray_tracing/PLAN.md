@@ -315,24 +315,32 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 | 樹葉著色法線改朝世界上方（對齊即時 billboard 打光） | ✅ | `merge_instances.js` |
 | 樹冠覆蓋率（2→3 quad asterisk + 1.4x，補滿葉縫看穿問題） | ✅ | `merge_instances.js`（`FOLIAGE_FRAMES`） |
 | **1 樹葉亮度/顏色微調（黑樹冠修復）** | ✅ | `merge_instances.js` + `post_pixelart.js`（見下方說明） |
-| **8 葉片半透明（Habel 2007 近似）** | ✅ 改用 emissive | `merge_instances.js`（transmission 近似在密集疊片下越疊越黑，改用 Habel 的「additive self-illumination」做法＝emissive glow floor） |
+| **樹冠雙層（葉感/縫隙/分層回來）** | ✅ | `merge_instances.js` + `raytrace_mode.js`（inner 實心填充 1.15x + outer alpha-cutout 葉片 1.5x） |
+| **樹冠放射狀法線（立體 form shading）** | ✅ | `merge_instances.js`（`NORMAL_UP/RADIAL`，取代全世界上方→不再平面綠） |
+| **8 葉片半透明（Habel 2007 近似）** | ✅ 改用 emissive | `merge_instances.js`（transmission 近似在密集疊片下越疊越黑，改用 Habel 的「additive self-illumination」＝emissive glow floor `0x3c6b28 @0.3`，壓低以免蓋掉 form shading） |
 | **9 寫實 hero shot 對照切換** | ✅ | `raytrace_mode.js`（`#pt-photoreal` 按鈕）+ `post_pixelart.js`（`renderPhotoreal`：bypass cel/outline，純 ACES+sRGB 全解析度輸出） |
 | **7 stratified sampling 確認** | ✅ 確認預設已開 | three-gpu-pathtracer 預設 `RANDOM_TYPE=2`（stratified list，等同 term pj 的 Owen-scrambled Sobol 精神）；Sobol(type1) 會壞 macOS compiler，不動 |
+| **PT 反射水面（path-traced reflections 炫技）** | ✅ | `raytrace_mode.js`（水面不再隱藏，換近鏡面 `MeshPhysicalMaterial` teal/roughness 0.07/ior 1.33，照出天空+樹） |
+| **PT 模式描邊預設開 + 相機偏向水池** | ✅ | `raytrace_mode.js`（`PT_OUTLINE_DEFAULT=1.2`；`TARGET_POND_BIAS` pan 讓水入鏡；FOV 30→33） |
 
-**樹冠由黑變綠的關鍵診斷（item 1，路徑追蹤沙箱逐張比對得出）**：
-1. **看穿到黑**：sprig 貼圖是稀疏羽狀 alpha cutout（alphaTest 0.5），在真正的 GI 下相機光線會穿過葉縫，
-   打到自陰影的樹冠內部＋棕色 core，於是樹冠變成近黑剪影；即時 billboard 永遠面向相機所以看不到這問題。
-   **解法**：foliage 端**丟掉 alpha cutout**，烘成**實心**交叉 quad（3-quad asterisk 直接填滿、無縫），
-   葉色改由 per-instance vertex-colour 漸層（tree.js 的 dark→warm，再 lerp 向亮綠 `_LIFT` 0x9ccc6a 提亮）提供。
-2. **半透明（item 8）**：原本 `MeshPhysicalMaterial` transmission 在多層疊片下 Beer-Lambert 吸收越疊越黑；
-   改成 Habel 2007 real-time 近似的本質做法——**additive self-illumination（emissive glow floor 0x4c7d33 @0.7）**，
-   path tracer 直接在表面加 emission（不被 albedo 調制、也不被前方葉片吸收），陰影內葉片有柔和綠光、不再壓黑。
-   `roughness=1.0` 讓葉片純漫反射，避免偏藍天空 env 在暗綠葉面上反出紫色高光。
-3. **post 去飽和過頭**：`post_pixelart.js` COMP grade 原本 `mix(luma,color,0.88)`＋airy wash 0.11 把綠吃掉，
-   放寬到 0.94 / 0.07 讓綠更跳（只影響 PT 視圖，不動即時端）。
+**樹冠由黑變綠、再由「全綠平面」變立體葉感的診斷（路徑追蹤沙箱逐張比對得出）**：
+1. **看穿到黑**：sprig 貼圖是稀疏羽狀 alpha cutout（alphaTest 0.5），真 GI 下相機光線穿過葉縫打到自陰影內部＋
+   棕色 core → 近黑剪影（即時 billboard 永遠面向相機所以看不到）。**第一版解法**是 foliage 丟 cutout 改實心，
+   但變成沒葉感的綠 blob。**最終解法＝雙層**：inner 較小實心填充（保證縫隙不透黑）+ outer alpha-cutout 葉片
+   （葉形/縫隙/分層回來），縫隙看進去是柔和暗綠而非黑。
+2. **全綠平面 → 立體**：所有葉片著色法線原本都設世界上方，path tracer 裡每片葉直接光照**完全相同**→平面綠。
+   改成**依位置放射狀（向外+向上）法線**，向陽面亮、背陽面暗，做出圓樹冠 form shading。
+3. **半透明（item 8）**：transmission 在疊片下越疊越黑；改 Habel 的 additive self-illumination（emissive floor），
+   且**壓到 0x3c6b28 @0.3**（偏暗、低強度），只把最深陰影撐出黑、不蓋掉 form shading。`roughness=1.0` 避免藍 env 反紫。
+   葉色用 per-instance vertex-colour 漸層（dark→warm），`_LIFT` 提亮量降到 0.10 以保留漸層。
+4. **post 去飽和放寬**：COMP grade `mix(luma,color)` 0.88→0.94、airy wash 0.11→0.07，讓綠更跳（只影響 PT 視圖）。
+5. **水**：即時是程序化平面反射 shader（非 PBR，被隱藏）；PT 改成真鏡面 `MeshPhysicalMaterial`，照出天空 env+樹
+   ——正是 path tracer 最能打、即時最難假的賣點。相機 pan 一點向水池讓它入鏡。
+6. **描邊**：cel+ink 是 pixel-art 後處理的精髓，但 outline slider 全域預設 0。PT 模式專屬預設 `1.2`（拉 slider 仍覆蓋、
+   Outlines toggle 關仍關），一進 Path Trace 就有像素美術特色。
 
-**目前 demo 視覺狀態**：樹冠已是完整、飽和的針葉綠（pixel-art / photoreal 兩視圖都正常），
-地面有 path-traced 柔和接觸陰影。三張對照圖見 `docs/screenshots/compare_*.png`。
+**目前 demo 視覺狀態**：樹冠是完整、有葉感、有立體明暗的針葉綠（pixel-art 有描邊特色 / photoreal 有 form shading），
+地面有 path-traced 柔和接觸陰影，水池會反射天空與樹。三張對照圖見 `docs/screenshots/compare_*.png`。
 
 ### 9.2 待完成（接續工作，依優先序）
 
@@ -345,14 +353,15 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
    - 注意 §9.3 B：裝套件請在專案外或小心 lockfile/Vite optimize。
 
 2. **PLAN 項目 6 — Hashed Alpha Testing（Wyman & McGuire 2017）**（半天）
-   - **現況變更**：foliage 端已**不再用 alpha cutout**（改實心 quad,見 §9.1），所以原本「path tracer
-     端 stochastic transparency」這條已無對象。本項剩**即時端**（real-time billboard shader）。
+   - **現況變更**：foliage 已改**雙層**（inner 實心 + outer alpha-cutout，見 §9.1）。outer 仍是硬 alphaTest 0.5，
+     可在此改 stochastic/hashed alpha 讓葉緣更柔；或做**即時端**（real-time billboard shader）注入 hash(worldPos)。
    - 作法（對應原 PLAN 的 `alpha_leaf.js`）：在 `01/src/materials.js` 的 billboard fragment shader
      注入 `hash(worldPos)` 當 alpha 門檻取代硬 `alphaTest 0.5`,配合 TAA/累積得到柔邊。報告放即時端一張。
 
-3. **（選）樹冠精修**：目前 foliage 是實心 vertex-colour quad,失去細葉剪影（pixel-art 解析度下其實看不太出來,
-   outline pass 也會重新風格化）。若要更細緻,可評估：(a) 在實心樹冠**外殼**再疊一層 alpha-cutout 葉片補細節,
-   或 (b) 提高 emissive glow 對比讓 tier 更分明。亦可微調 `_LIFT` / `FOLIAGE_LIFT` / emissive 讓頂部更暖。
+3. **（選）樹冠/水/相機微調**：雙層葉冠 + 放射法線 + 反射水都已落地（§9.1）。若要再推：
+   (a) outer 葉片改 stochastic/hashed alpha 讓葉緣更柔（與 item 6 合併）；
+   (b) 微調 `_LIFT` / `FOLIAGE_LIFT` / emissive 讓樹頂更暖、tier 更分明；
+   (c) 水面加一點波動 normal map 或 clearcoat 讓反射有漣漪；(d) `TARGET_POND_BIAS` / FOV 進一步調構圖。
 
 ### 9.3 開發/驗證須知（踩過的雷,務必先讀）
 
@@ -391,14 +400,15 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 - 指向正確的 `http://localhost:<port>/`。
 
 ### 9.4 關鍵檔案地圖
-- `03_ray_tracing/src/raytrace_mode.js` — mode plugin:hide instanced/points/water →
-  merge billboards(foliage `foliage:true`,grass `false`)→ 換 MeshStandardMaterial →
-  IBL env → perspective cam → `WebGLPathTracer`(stratified sampling,見 §9.1 item 7)+ BVH worker →
-  每 frame `renderSample` + post。`#pt-photoreal` 按鈕切 pixel-art / photoreal(`_state.photoreal`)。
+- `03_ray_tracing/src/raytrace_mode.js` — mode plugin:hide instanced/points(水**不**隱藏)→
+  merge billboards(grass 1 層;foliage **2 層** inner 實心 1.15x + outer cutout 1.5x)→ 水換近鏡面
+  `MeshPhysicalMaterial`(1c)→ 其餘換 MeshStandardMaterial → IBL env → perspective cam(`TARGET_POND_BIAS`
+  pan 向水池)→ `WebGLPathTracer`(stratified,§9.1 item 7)+ BVH worker → 每 frame `renderSample` + post。
+  `#pt-photoreal` 按鈕切 pixel-art / photoreal;`PT_OUTLINE_DEFAULT` 讓描邊預設開。
 - `03_ray_tracing/src/merge_instances.js` — billboard→static crossed-quad 烘焙;`FRAMES`(grass 2 quad)
-  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk + 1.4x);**foliage = 實心 quad + vertex-colour 漸層(`_LIFT` 提亮)
-  + emissive glow floor(Habel 近似)**;grass = map + alphaTest cutout。
+  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk);參數 `foliage`(放射法線+emissive+lift)、`cutout`(map+alphaTest
+  vs 實心)、`sizeScale`。foliage 放射狀法線 `NORMAL_UP/RADIAL` 做 form shading;`_LIFT`/`FOLIAGE_LIFT` 提亮漸層。
 - `03_ray_tracing/src/post_pixelart.js` — `render()`:cel ramp(含 `CEL_SHADOW_FLOOR`)+ outline + low-res
   upscale + COMP grade(去飽和已放寬);`renderPhotoreal()`:bypass 全部,純 ACES+sRGB 全解析度(hero shot)。
 - `01_webgl_tree/src/scene/tree.js` — 樹幾何;foliage instance 生成(droop 已修 `R>0` 防 NaN)。
-- 驗證沙箱:`~/pptr-sandbox/shot.mjs`(headful + KHR ext hider,`--mode/--spp/--clicks/--motionoff/--clean`)。
+- 驗證沙箱:`~/pptr-sandbox/shot.mjs`(headful + KHR ext hider,`--mode/--spp/--clicks/--motionoff/--clean/--outline`)。
