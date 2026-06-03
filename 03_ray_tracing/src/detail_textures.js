@@ -158,6 +158,63 @@ export function makeBarkTextures(size = 384, seed = 23) {
   );
 }
 
+// Tiling water-ripple NORMAL map: a sum of directional sine wavelets (integer
+// frequencies so it tiles seamlessly). A flat mirror reads as glass/metal; these
+// ripples break up the reflection and scatter the sun into sparkling specular
+// highlights — the "light on water" cue that makes it read as real water.
+export function makeWaterNormal(size = 512) {
+  // [freqX, freqY, amplitude, phase]
+  const waves = [
+    [3, 1, 0.5, 0.0],
+    [2, -3, 0.4, 1.3],
+    [5, 2, 0.25, 2.1],
+    [-4, 5, 0.2, 0.7],
+    [7, -1, 0.14, 3.0],
+    [1, 8, 0.12, 1.8],
+  ];
+  const TP = Math.PI * 2;
+  const h = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      let s = 0;
+      for (const w of waves) s += w[2] * Math.sin((u * w[0] + v * w[1]) * TP + w[3]);
+      h[y * size + x] = s;
+    }
+  }
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  const strength = 2.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const hl = h[y * size + ((x - 1 + size) % size)];
+      const hr = h[y * size + ((x + 1) % size)];
+      const hd = h[((y - 1 + size) % size) * size + x];
+      const hu = h[((y + 1) % size) * size + x];
+      let nx = -(hr - hl) * strength;
+      let ny = -(hu - hd) * strength;
+      let nz = 1;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      const i = (y * size + x) * 4;
+      img.data[i] = (nx / l * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (nz / l * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.NoColorSpace;
+  t.anisotropy = 4;
+  t.needsUpdate = true;
+  return t;
+}
+
 export function disposeTextures(pair) {
   if (!pair) return;
   pair.map?.dispose?.();

@@ -463,6 +463,9 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 - **水面鏡面**:dielectric(ior)從俯角只反射 ~10% → 像死板 teal 色塊。改 **metallic mirror**
   (`metalness 0.92, roughness 0.02, color 0x8fc0cc, clearcoat 1`)讓反射主導 → 亮鏡面湖;
   env 太陽盤 `9→16` 給水面 sun glint。(非物理,但這是要的亮鏡面湖。)
+- **水波(真實水感)**:平鏡面像玻璃/金屬、沒「光照感」。加 `makeWaterNormal()` 程序化波紋
+  normal map(整數頻率正弦波疊加,可無縫 tiling)→ 打散反射 + 把太陽散成閃爍高光。
+  pond 幾何無 uv,於 raytrace_mode 由 local XY 補平面 uv(dispose 時移除)。normalScale 0.32。
 - **坑(重要)**:three-gpu-pathtracer 場景 merge 的 color attribute 是 **itemSize 4 (RGBA)**;
   clump 若用 itemSize 3 會 mismatch → 葉子洗成白色。必須寫 RGBA(alpha=1)。
 - **DoF 調弱**:`fStop 0.008→0.03`(使用者嫌太糊,改成只有遠近輕微分離)。

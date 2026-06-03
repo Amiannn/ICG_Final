@@ -4,7 +4,7 @@ import { GenerateMeshBVHWorker } from "three-mesh-bvh/src/workers/GenerateMeshBV
 import { PixelArtPost } from "./post_pixelart.js";
 import { mergeBillboardsToMesh, buildFoliageClumps } from "./merge_instances.js";
 import { makeSkyEnv } from "./sky_env.js";
-import { makeGrassTextures, makeBarkTextures, disposeTextures } from "./detail_textures.js";
+import { makeGrassTextures, makeBarkTextures, makeWaterNormal, disposeTextures } from "./detail_textures.js";
 
 // 03 · Path-traced view of the Pixel Bonsai scene.
 //
@@ -35,6 +35,7 @@ const PERSP_FOV_DEG = 33;
 const PERSP_DIST_SCALE = 2.05; // pull eye back so the narrow FOV roughly matches the ortho extent
 const TARGET_POND_BIAS = 0.2; // look-down bias toward the relocated foreground pond so it stays framed
 const WATER_FOREGROUND_DIST = 9.5; // how far in front of the tree (toward camera) to relocate the pond in PT mode
+const MAX_SPP = 256; // stop accumulating once converged — beyond this the image barely changes but the GPU keeps running at full load. Camera motion resets samples to 0 and re-accumulates up to here.
 
 // Outline is OFF by default in path-trace mode, matching the real-time view
 // (whose outline slider also defaults to 0 — its pixel-art look comes from the
@@ -158,14 +159,33 @@ export const raytraceMode = {
       // dominates, so we make it a tinted near-metal: reflection-dominant,
       // tinted teal, with a clearcoat for a wet sheen. Unphysical, but it's the
       // bright mirror lake the look calls for (and what the real-time fake fakes).
+      // Ripple normals turn the flat mirror into real water: they break up the
+      // reflection and scatter the sun into sparkling specular highlights (the
+      // "light on water" feel). The pond geometry has no UVs (it's a custom
+      // triangle fan), so derive planar UVs from its local XY for the normal map.
+      _state.waterNormalTex = makeWaterNormal(512);
+      const wg = wm.geometry;
+      if (!wg.attributes.uv) {
+        const wpos = wg.attributes.position;
+        const uvArr = new Float32Array(wpos.count * 2);
+        for (let i = 0; i < wpos.count; i++) {
+          uvArr[2 * i] = wpos.getX(i) * 0.7;
+          uvArr[2 * i + 1] = wpos.getY(i) * 0.7;
+        }
+        wg.setAttribute("uv", new THREE.BufferAttribute(uvArr, 2));
+        _state.waterAddedUV = true;
+      }
+
       const waterMat = new THREE.MeshPhysicalMaterial({
         color: 0x8fc0cc, // tints the (dominant) reflection a cool teal
-        roughness: 0.02, // crisp mirror
-        metalness: 0.92, // reflection-dominant -> sky + tree mirror clearly
+        roughness: 0.03, // crisp ripple reflections + sharp sun sparkles
+        metalness: 0.88, // reflection-dominant -> sky + tree mirror clearly
+        normalMap: _state.waterNormalTex,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.0,
+        clearcoatRoughness: 0.04,
         side: THREE.DoubleSide,
       });
+      waterMat.normalScale.set(0.32, 0.32);
       _state.matSwap.push({ obj: wm, original: wm.material });
       wm.material = waterMat;
     }
@@ -376,7 +396,13 @@ export const raytraceMode = {
     if (moved && _state.ready) _state.pathTracer.updateCamera();
 
     if (_state.ready) {
-      _state.pathTracer.renderSample();
+      // Accumulate only up to MAX_SPP. Once converged we stop tracing (GPU goes
+      // idle) but keep blitting the same finished target.texture every frame, so
+      // the canvas stays lit. updateCamera() above resets samples on motion, so
+      // moving the camera transparently re-arms accumulation up to MAX_SPP again.
+      if (_state.pathTracer.samples < MAX_SPP) {
+        _state.pathTracer.renderSample();
+      }
       // Path Trace is photoreal-only now: ACES-tonemapped radiance at full
       // resolution (no cel/outline/pixelation). Exposure < 1 keeps the lit
       // foliage in the saturated midtones instead of ACES's pale shoulder.
@@ -422,9 +448,11 @@ export const raytraceMode = {
       obj.material = original;
     }
 
-    // Restore the pond to its original (off-frame) position for the other modes.
-    if (_state.waterPos && ctx.world.water && ctx.world.water.mesh) {
-      ctx.world.water.mesh.position.copy(_state.waterPos);
+    // Restore the pond to its original (off-frame) position for the other modes,
+    // and remove the UVs we added for the ripple normal map.
+    if (ctx.world.water && ctx.world.water.mesh) {
+      if (_state.waterPos) ctx.world.water.mesh.position.copy(_state.waterPos);
+      if (_state.waterAddedUV) ctx.world.water.mesh.geometry.deleteAttribute("uv");
     }
 
     // Restore the scene's environment lighting and free the generated sky.
@@ -439,6 +467,7 @@ export const raytraceMode = {
     if (_state.envTex) _state.envTex.dispose();
     disposeTextures(_state.grassTex);
     disposeTextures(_state.barkTex);
+    if (_state.waterNormalTex) _state.waterNormalTex.dispose();
 
     if (_state.hud) _state.hud.remove();
 
@@ -480,7 +509,7 @@ export const raytraceMode = {
       return;
     }
     const spp = Math.floor(_state.pathTracer.samples || 0);
-    const status = spp >= 64 ? "converged" : spp <= 1 ? "tracing…" : "converging…";
+    const status = spp >= MAX_SPP ? "converged" : spp <= 1 ? "tracing…" : "converging…";
     el.textContent = `Path trace · photoreal · ${status}\n${spp} spp`;
   },
 
