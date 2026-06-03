@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { WebGLPathTracer, PhysicalCamera } from "three-gpu-pathtracer";
 import { GenerateMeshBVHWorker } from "three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js";
 import { PixelArtPost } from "./post_pixelart.js";
-import { mergeBillboardsToMesh } from "./merge_instances.js";
+import { mergeBillboardsToMesh, buildFoliageClumps } from "./merge_instances.js";
 import { makeSkyEnv } from "./sky_env.js";
 import { makeGrassTextures, makeBarkTextures, disposeTextures } from "./detail_textures.js";
 
@@ -79,8 +79,6 @@ export const raytraceMode = {
       post: null, // M3 pixel-art post chain (cel + outline + low-res upscale)
       ready: false,
       hud: null, // sample-count overlay
-      photoreal: false, // report hero-shot: bypass pixel-art post (PLAN item 9)
-      photorealBtn: null,
       lastTargetWorld: new THREE.Vector3(),
       lastEyeWorld: new THREE.Vector3(),
     };
@@ -117,27 +115,13 @@ export const raytraceMode = {
       // just vanishes to black under GI). Kept FEW + small so the canopy stays
       // open/sparse like the real-time view: the small green clumps leave gaps
       // that show the lit trunk/branches through them, instead of a dense bush.
-      const leaves = mergeBillboardsToMesh(obj, {
-        roughness: SURFACE_ROUGHNESS,
-        foliage: true,
-        solid: true,
-        sizeScale: 1.2,
-      });
+      // Real 3D foliage: each sprig anchor becomes a couple of small icosahedron
+      // leaf-clumps (see buildFoliageClumps). Replaces the flat crossed cards,
+      // which read as ugly cardboard under the path tracer — the 3D blobs have
+      // real form, self-shadowing and GI colour bleed (a clean low-poly conifer).
+      const leaves = buildFoliageClumps(obj, { sizeScale: 1.25, clumpsPerInst: 4, detail: 1 });
       obj.parent.add(leaves);
       _state.merged.push({ mesh: leaves, parent: obj.parent });
-
-      // Leaf-silhouette detail layer: cutout cards (sprig alpha) slightly larger
-      // than the solid backing, so the canopy edge reads as individual leaves
-      // rather than card rectangles. Cutout gaps land on the solid green backing
-      // (never the dark interior), so it adds detail without going black.
-      const leafDetail = mergeBillboardsToMesh(obj, {
-        roughness: SURFACE_ROUGHNESS,
-        foliage: true,
-        solid: false,
-        sizeScale: 1.5,
-      });
-      obj.parent.add(leafDetail);
-      _state.merged.push({ mesh: leafDetail, parent: obj.parent });
     }
 
     // 1c. Path-traced water. Two parts:
@@ -273,7 +257,7 @@ export const raytraceMode = {
     _state.prevSunIntensity = ctx.lighting.sun.intensity;
     ctx.lighting.sun.position.copy(ptSunDir).multiplyScalar(20);
     ctx.lighting.sun.color.setHex(0xffdca6); // warm golden key
-    ctx.lighting.sun.intensity = 3.8;
+    ctx.lighting.sun.intensity = 3.2;
     ctx.lighting.sun.target.position.set(0, 0, 0);
     ctx.lighting.sun.target.updateMatrixWorld();
     ctx.lighting.sun.updateMatrixWorld();
@@ -281,17 +265,23 @@ export const raytraceMode = {
     const env = makeSkyEnv(ptSunDir, {
       skyIntensity: 0.65,
       sunColor: [1.0, 0.86, 0.6],
-      sunIntensity: 60.0, // for the pond glint / glossy reflections, not the key
+      sunIntensity: 9.0, // faint glint in reflections only — the directional light is the key (avoid double-lighting diffuse)
       sunAngularDeg: 2.0,
       zenith: [0.09, 0.24, 0.58],
       horizon: [0.52, 0.62, 0.74],
       ground: [0.16, 0.16, 0.13],
     });
     scene.environment = env;
-    scene.environmentIntensity = 0.8; // cool sky fill in shadow, secondary to the key
+    scene.environmentIntensity = 0.7; // cool sky fill in shadow, secondary to the key
     _state.prevBackground = scene.background;
     scene.background = env; // show the real sky behind the scene
     _state.envTex = env;
+
+    // Disable the real-time distance fog in PT: it's a fixed pale haze that
+    // washes the photoreal render to grey (depth here comes from the sky env +
+    // GI, not flat fog). Restored on dispose.
+    _state.prevFog = scene.fog;
+    scene.fog = null;
 
     // 4. Renderer setup. Tonemapping is done in the post chain's edge shader
     //    (in-shader ACES on the linear PT target), so keep the renderer itself
@@ -309,11 +299,12 @@ export const raytraceMode = {
       0.5,
       200,
     );
-    // three-gpu-pathtracer scales the aperture by bokehSize*1e-3 (assumes a
-    // millimetre-scale scene); our scene is ~40 units, so a "normal" f-stop gives
-    // sub-pixel blur. Use a very low f-stop to get a real shallow DoF — the
-    // foreground pond + far ground blur to soft bokeh, tree stays sharp.
-    persp.fStop = 0.008;
+    // Subtle depth of field: the scene stays mostly in focus, with only a gentle
+    // far/near falloff for depth (not the heavy macro blur). three-gpu-pathtracer
+    // scales the aperture by bokehSize*1e-3 (assumes a mm-scale scene); our scene
+    // is ~40 units, so the f-stop is unusually small. f/0.03 ≈ light separation;
+    // 0.008 was strong macro blur.
+    persp.fStop = 0.03;
     persp.apertureBlades = 6;
     persp.focusDistance = 40; // refined to the eye→tree distance each frame in _syncCamera
     _state.perspCam = persp;
@@ -342,7 +333,9 @@ export const raytraceMode = {
     // sampling is confirmed active by default; no override is needed.
     _state.pathTracer = tracer;
 
-    // M3 post chain — renders the traced output in the pixel-art register.
+    // Post chain — only its renderPhotoreal() path is used now (ACES + sRGB
+    // full-res blit of the traced radiance). The pixel-art cel/outline register
+    // was removed: PT is the photoreal showcase, the pixel-art look lives in 01.
     _state.post = new PixelArtPost(renderer);
 
     // Build the BVH on a web worker so switching into this mode doesn't freeze
@@ -358,7 +351,6 @@ export const raytraceMode = {
     //    the current spp and a "building BVH / converging / converged" state —
     //    without it the progressive refinement looks like it never finishes.
     _state.hud = this._buildHud();
-    _state.photorealBtn = this._buildPhotorealToggle();
 
     const p = tracer.setSceneAsync(scene, persp);
     if (p && typeof p.then === "function") {
@@ -380,31 +372,10 @@ export const raytraceMode = {
 
     if (_state.ready) {
       _state.pathTracer.renderSample();
-
-      if (_state.photoreal) {
-        // Report hero shot: raw ACES-tonemapped radiance at full resolution,
-        // no cel/outline/pixelation (PLAN item 9).
-        _state.post.renderPhotoreal(_state.pathTracer.target.texture);
-      } else {
-        // Post chain runs at the same low-res as the real-time view so the pixel
-        // grid matches. uVertical resolution drives the block size.
-        const { renderer, scene, settings } = ctx;
-        const bufH = renderer.domElement.height;
-        const bufW = renderer.domElement.width;
-        const displayH = Math.max(1, settings.verticalResolution);
-        const displayW = Math.max(1, Math.round(displayH * (bufW / bufH)));
-        _state.post.setSize(displayW, displayH);
-
-        const outline = settings.outlines ? settings.outlineStrength : 0;
-        _state.post.render({
-          colorTex: _state.pathTracer.target.texture,
-          scene,
-          camera: _state.perspCam,
-          outline,
-          grain: settings.grain,
-          time,
-        });
-      }
+      // Path Trace is photoreal-only now: ACES-tonemapped radiance at full
+      // resolution (no cel/outline/pixelation). Exposure < 1 keeps the lit
+      // foliage in the saturated midtones instead of ACES's pale shoulder.
+      _state.post.renderPhotoreal(_state.pathTracer.target.texture, 0.6);
     }
     this._updateHud();
   },
@@ -455,6 +426,7 @@ export const raytraceMode = {
     ctx.scene.environment = _state.prevEnvironment;
     ctx.scene.environmentIntensity = _state.prevEnvIntensity;
     if (_state.prevBackground !== undefined) ctx.scene.background = _state.prevBackground;
+    if (_state.prevFog !== undefined) ctx.scene.fog = _state.prevFog;
     if (_state.prevSunPos) ctx.lighting.sun.position.copy(_state.prevSunPos);
     if (_state.prevSunColor) ctx.lighting.sun.color.copy(_state.prevSunColor);
     if (_state.prevSunIntensity !== undefined) ctx.lighting.sun.intensity = _state.prevSunIntensity;
@@ -464,7 +436,6 @@ export const raytraceMode = {
     disposeTextures(_state.barkTex);
 
     if (_state.hud) _state.hud.remove();
-    if (_state.photorealBtn) _state.photorealBtn.remove();
 
     renderer.toneMapping = _state.toneMapping;
     renderer.autoClear = _state.autoClear;
@@ -496,36 +467,6 @@ export const raytraceMode = {
     return el;
   },
 
-  // Report hero-shot toggle (PLAN item 9). Flips between the pixel-art post
-  // chain and the raw ACES/sRGB photoreal blit. Sits just above the spp HUD.
-  _buildPhotorealToggle() {
-    const btn = document.createElement("button");
-    btn.id = "pt-photoreal";
-    btn.type = "button";
-    btn.textContent = "◻ Photoreal";
-    btn.style.cssText = [
-      "position:fixed",
-      "right:12px",
-      "bottom:64px",
-      "z-index:21",
-      "padding:6px 12px",
-      "font:12px/1.2 ui-monospace,Menlo,Consolas,monospace",
-      "color:#cdeae8",
-      "background:rgba(8,18,20,0.72)",
-      "border:1px solid rgba(120,200,195,0.35)",
-      "border-radius:8px",
-      "cursor:pointer",
-    ].join(";");
-    btn.addEventListener("click", () => {
-      if (!_state) return;
-      _state.photoreal = !_state.photoreal;
-      btn.textContent = _state.photoreal ? "◼ Photoreal" : "◻ Photoreal";
-      btn.style.color = _state.photoreal ? "#fff2c8" : "#cdeae8";
-    });
-    document.body.appendChild(btn);
-    return btn;
-  },
-
   _updateHud() {
     const el = _state.hud;
     if (!el) return;
@@ -535,8 +476,7 @@ export const raytraceMode = {
     }
     const spp = Math.floor(_state.pathTracer.samples || 0);
     const status = spp >= 64 ? "converged" : spp <= 1 ? "tracing…" : "converging…";
-    const look = _state.photoreal ? "photoreal" : "pixel-art";
-    el.textContent = `Path trace · ${status} · ${look}\n${spp} spp`;
+    el.textContent = `Path trace · photoreal · ${status}\n${spp} spp`;
   },
 
   _syncCamera(ctx) {

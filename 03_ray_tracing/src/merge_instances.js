@@ -284,6 +284,115 @@ export function mergeBillboardsToMesh(
   return mesh;
 }
 
+// Build REAL 3D foliage geometry from a billboard InstancedMesh: each sprig
+// anchor becomes a couple of small icosahedron "leaf clumps", merged into one
+// static Mesh. Flat crossed cards read as ugly cardboard under the path tracer;
+// little 3D blobs have real form, self-shadowing and GI colour bleed — a clean
+// low-poly conifer. Per-instance tint (the dark-base→warm-crown gradient from
+// tree.js) is baked into vertex colours; the layered skirt anchor distribution
+// keeps the conifer silhouette.
+export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 2, detail = 1 } = {}) {
+  const base = new THREE.IcosahedronGeometry(1, detail);
+  const bp = base.attributes.position.array;
+  const bn = base.attributes.normal.array;
+  const vertsPerClump = base.attributes.position.count;
+  const count = inst.count;
+  const total = count * clumpsPerInst * vertsPerClump;
+  const positions = new Float32Array(total * 3);
+  const normals = new Float32Array(total * 3);
+  // RGBA (itemSize 4): three-gpu-pathtracer's scene merge builds the colour
+  // attribute as 4-component, so a 3-component one mismatches and whites out.
+  const colors = new Float32Array(total * 4);
+
+  // Canopy vertical extent → a controlled dark-base → warm-crown green gradient
+  // (more reliable than re-using the instance colours, whose colour-space
+  // handling washed the lower skirts pale). Palette written straight to the
+  // colour attribute as moderate-albedo greens so the key doesn't blow them out.
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < count; i++) {
+    inst.getMatrixAt(i, _mat);
+    const y = _mat.elements[13];
+    if (Number.isFinite(y)) {
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const ySpan = Math.max(1e-3, maxY - minY);
+  const GBASE = [0.15, 0.28, 0.11];
+  const GMID = [0.28, 0.43, 0.15];
+  const GTOP = [0.55, 0.60, 0.28];
+
+  let vi = 0;
+  let skipped = 0;
+  for (let i = 0; i < count; i++) {
+    inst.getMatrixAt(i, _mat);
+    _pos.setFromMatrixPosition(_mat);
+    const sx = _vecLen(_mat.elements, 0);
+    const sy = _vecLen(_mat.elements, 4);
+    if (!_isFinite3(_pos) || !Number.isFinite(sx) || !Number.isFinite(sy)) {
+      skipped++;
+      continue;
+    }
+
+    const baseR = sx * 0.34 * sizeScale;
+    for (let k = 0; k < clumpsPerInst; k++) {
+      const seed = i * 19.13 + k * 7.7;
+      const cx = _pos.x + (_hash(seed + 0.1) - 0.5) * sx * 0.85 * sizeScale;
+      const cy = _pos.y + (_hash(seed + 0.2) - 0.5) * sy * 0.7 * sizeScale;
+      const cz = _pos.z + (_hash(seed + 0.3) - 0.5) * sx * 0.85 * sizeScale;
+      const r = baseR * (0.6 + 0.5 * _hash(seed + 0.4)); // smaller, denser blobs read as foliage not grapes
+      const t = (cy - minY) / ySpan;
+      const t1 = Math.min(1, Math.max(0, t * 1.25));
+      const t2 = Math.min(1, Math.max(0, (t - 0.55) * 1.8));
+      const lj = (_hash(seed + 0.5) - 0.5) * 0.06;
+      const cr = GBASE[0] + (GMID[0] - GBASE[0]) * t1 + (GTOP[0] - GMID[0]) * t2 + lj;
+      const cg = GBASE[1] + (GMID[1] - GBASE[1]) * t1 + (GTOP[1] - GMID[1]) * t2 + lj;
+      const cb = GBASE[2] + (GMID[2] - GBASE[2]) * t1 + (GTOP[2] - GMID[2]) * t2 + lj;
+      for (let v = 0; v < vertsPerClump; v++) {
+        const o = vi * 3;
+        positions[o] = cx + bp[v * 3] * r;
+        positions[o + 1] = cy + bp[v * 3 + 1] * r;
+        positions[o + 2] = cz + bp[v * 3 + 2] * r;
+        normals[o] = bn[v * 3];
+        normals[o + 1] = bn[v * 3 + 1];
+        normals[o + 2] = bn[v * 3 + 2];
+        const co = vi * 4;
+        colors[co] = cr;
+        colors[co + 1] = cg;
+        colors[co + 2] = cb;
+        colors[co + 3] = 1;
+        vi++;
+      }
+    }
+  }
+  base.dispose();
+  if (skipped > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(`buildFoliageClumps: skipped ${skipped}/${count} non-finite instances`);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions.subarray(0, vi * 3), 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals.subarray(0, vi * 3), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors.subarray(0, vi * 4), 4));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    roughness: 0.85,
+    metalness: 0.0,
+    // gentle translucency floor so the deep canopy interior isn't pure black
+    emissive: new THREE.Color(0x3f6e2c),
+    emissiveIntensity: 0.12,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 function _vecLen(e, col) {
   const x = e[col],
     y = e[col + 1],

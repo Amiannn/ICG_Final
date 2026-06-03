@@ -144,6 +144,7 @@ const PHOTOREAL_FRAG = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D tColor;
+  uniform float uExposure;
 
   vec3 aces(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
@@ -153,7 +154,8 @@ const PHOTOREAL_FRAG = /* glsl */ `
   }
 
   void main() {
-    gl_FragColor = vec4(toSRGB(aces(texture2D(tColor, vUv).rgb)), 1.0);
+    vec3 hdr = texture2D(tColor, vUv).rgb * uExposure;
+    gl_FragColor = vec4(toSRGB(aces(hdr)), 1.0);
   }
 `;
 
@@ -222,7 +224,7 @@ export class PixelArtPost {
       fragmentShader: PHOTOREAL_FRAG,
       depthTest: false,
       depthWrite: false,
-      uniforms: { tColor: { value: null } },
+      uniforms: { tColor: { value: null }, uExposure: { value: 1 } },
     });
 
     this.quadScene = new THREE.Scene();
@@ -301,9 +303,10 @@ export class PixelArtPost {
 
   // Photoreal hero-shot path: blit the traced radiance straight to the canvas
   // at full resolution through ACES + sRGB only (no cel/outline/pixelation).
-  renderPhotoreal(colorTex) {
+  renderPhotoreal(colorTex, exposure = 1) {
     const r = this.renderer;
     this.photoreal.uniforms.tColor.value = colorTex;
+    this.photoreal.uniforms.uExposure.value = exposure;
     this.quad.material = this.photoreal;
     r.setRenderTarget(null);
     r.clear();

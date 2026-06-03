@@ -450,5 +450,16 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 3. OIDN 降噪(PLAN item 5)→ 低 spp 更乾淨、可動。
 4. DoF 強度/構圖 microadjust;可接 UI 滑桿。
 
-> 註:pixel-art 視圖(同 mode 的非-photoreal)現也吃 sky/golden key/DoF/dense canopy;
-> 若要 pixel-art 維持原樣,需把這些參數對兩種輸出分離。
+### 10.4 第二輪(2026-06-03,使用者:樹別用卡片、別太糊、PT 走純寫實)
+- **PT 改 photoreal-only**:移除 pixel-art post 分支 + `◻ Photoreal` 切換鈕;`render()` 永遠
+  `renderPhotoreal()`。cel/outline 像素風只留在 `01` 即時視圖。
+- **樹冠改真 3D 幾何**:`merge_instances.buildFoliageClumps()` — 每個 sprig anchor 生 4 顆小
+  icosahedron clump(uniform scale 保住法線)、green-by-height 漸層(dark base→warm crown)。
+  取代醜的 billboard 卡片;3D blob 有體積/自陰影/GI,不再是紙板。
+- **坑(重要)**:three-gpu-pathtracer 場景 merge 的 color attribute 是 **itemSize 4 (RGBA)**;
+  clump 若用 itemSize 3 會 mismatch → 葉子洗成白色。必須寫 RGBA(alpha=1)。
+- **DoF 調弱**:`fStop 0.008→0.03`(使用者嫌太糊,改成只有遠近輕微分離)。
+- **避免雙重 key**:env 太陽盤 `sunIntensity 60→9`(只當反射 glint),方向光才是唯一 key,
+  否則漫反射被打兩次光 → ACES 白肩洗白。
+- **PT 關 fog**:`scene.fog=null`(dispose 還原)。即時霧是固定淡灰,壓暗光照後會洗灰整張。
+- **曝光控制**:`renderPhotoreal(tex, exposure)`,exposure 0.6 讓葉子落在飽和中間調。
