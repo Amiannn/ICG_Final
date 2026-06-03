@@ -104,7 +104,7 @@ export const raytraceMode = {
       if (obj === world.grass) {
         // Ground grass: a single cheap alpha-cutout cross (lit fine flat on the
         // ground, and seeing the ground through blade gaps is correct).
-        const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, foliage: false });
+        const mesh = mergeBillboardsToMesh(obj, { roughness: SURFACE_ROUGHNESS, foliage: false, sizeScale: 0.72 });
         obj.parent.add(mesh);
         _state.merged.push({ mesh, parent: obj.parent });
         continue;
@@ -119,7 +119,7 @@ export const raytraceMode = {
       // leaf-clumps (see buildFoliageClumps). Replaces the flat crossed cards,
       // which read as ugly cardboard under the path tracer — the 3D blobs have
       // real form, self-shadowing and GI colour bleed (a clean low-poly conifer).
-      const leaves = buildFoliageClumps(obj, { sizeScale: 1.2, clumpsPerInst: 12 });
+      const leaves = buildFoliageClumps(obj, { sizeScale: 1.2, clumpsPerInst: 22 });
       obj.parent.add(leaves);
       _state.merged.push({ mesh: leaves, parent: obj.parent });
     }

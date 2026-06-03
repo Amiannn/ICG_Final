@@ -292,8 +292,10 @@ export function mergeBillboardsToMesh(
 // bleed. A dark-base→warm-crown green gradient (by height) is baked into the
 // vertex colours; the layered skirt anchor distribution keeps the conifer form.
 export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 10 } = {}) {
-  // detail 0 = 20-face faceted spindle; cheap and crisp once elongated.
-  const base = new THREE.IcosahedronGeometry(1, 0);
+  // A thin 4-sided open cone = a pointed needle (one sharp tip, unlike the
+  // rounded-both-ends icosa that read as "beans"). Non-indexed so the merged
+  // output is flat-shaded per face. 4 tris each → cheap, so we can use many.
+  const base = new THREE.ConeGeometry(1, 1, 4, 1, true).toNonIndexed();
   const bp = base.attributes.position.array;
   const vertsPerClump = base.attributes.position.count;
   const count = inst.count;
@@ -385,11 +387,13 @@ export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 10 }
       const uyb = dnz * tx - dnx * tz;
       const uzb = dnx * ty - dny * tx;
 
-      const L = baseR * (1.4 + 0.9 * he); // needle length
-      const w = baseR * (0.16 + 0.12 * hf); // needle half-width
-      const cx = _pos.x + (hg - 0.5) * sx * 0.6 * sizeScale + dnx * L * 0.45;
-      const cy = _pos.y + (hh - 0.5) * sy * 0.5 * sizeScale + dny * L * 0.45;
-      const cz = _pos.z + (hj - 0.5) * sx * 0.6 * sizeScale + dnz * L * 0.45;
+      const L = baseR * (0.7 + 0.45 * he); // needle length (short)
+      const w = baseR * (0.055 + 0.05 * hf); // needle radius (thin)
+      // cone base at -L/2, tip at +L/2 along d -> root the needle at the anchor,
+      // tip pointing outward
+      const cx = _pos.x + (hg - 0.5) * sx * 0.7 * sizeScale + dnx * L * 0.5;
+      const cy = _pos.y + (hh - 0.5) * sy * 0.6 * sizeScale + dny * L * 0.5;
+      const cz = _pos.z + (hj - 0.5) * sx * 0.7 * sizeScale + dnz * L * 0.5;
 
       const tcol = (cy - minY) / ySpan;
       const t1 = Math.min(1, Math.max(0, tcol * 1.25));

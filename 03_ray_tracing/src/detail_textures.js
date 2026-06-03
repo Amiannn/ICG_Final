@@ -143,8 +143,8 @@ export function makeGrassTextures(size = 384, seed = 7) {
 
 // Bark: vertical streaks (high X freq, low Y freq) in warm browns; ridged relief.
 export function makeBarkTextures(size = 384, seed = 23) {
-  const darkB = [0.20, 0.12, 0.07];
-  const lightB = [0.50, 0.33, 0.19];
+  const darkB = [0.16, 0.12, 0.09]; // greyer, less orange bark
+  const lightB = [0.40, 0.33, 0.25];
   return bakePair(
     size,
     (u, v) => {
