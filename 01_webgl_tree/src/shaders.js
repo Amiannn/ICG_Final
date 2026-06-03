@@ -207,17 +207,23 @@ export const compositeFragment = /* glsl */ `
     return vec2(uOverscan, uOverscan) + uv * uDisplaySize;
   }
 
-  // animated falling rain streaks in screen space
-  float rainLayer(vec2 uv, float scaleX, float speed, float slant) {
-    uv.x += uv.y * slant;
-    vec2 cell = vec2(scaleX, scaleX * 0.06);
-    vec2 id = floor(uv * cell);
-    vec2 f = fract(uv * cell);
-    float h = hash(id);
-    float drop = fract(h * 13.0 + uTime * speed * (0.6 + h));
-    float streak = smoothstep(0.0, 0.08, f.y) * smoothstep(drop, drop - 0.18, f.y);
-    float thin = smoothstep(0.5, 0.0, abs(f.x - 0.5));
-    return streak * thin * step(0.55, h);
+  // One layer of falling rain: thin, slightly wind-slanted streaks. Each screen
+  // column carries short drops that fall and wrap, with per-column random speed,
+  // phase and brightness, so it reads as natural rainfall rather than a static
+  // grid of dashes.
+  float rainLayer(vec2 uv, float cols, float speed, float slant, float density) {
+    uv.x += uv.y * slant;                       // wind shear
+    float x = uv.x * cols;
+    float ci = floor(x);
+    float cf = fract(x) - 0.5;
+    float r = hash(vec2(ci, 17.0));
+    if (r > density) return 0.0;                // gaps between active columns
+    float r2 = hash(vec2(ci, 41.0));
+    float line = smoothstep(0.10, 0.015, abs(cf));           // thin vertical line
+    float spd = speed * (0.75 + 0.5 * r2);
+    float pos = fract(uv.y * 2.4 + uTime * spd + r * 31.0);  // drops fall + wrap
+    float streak = smoothstep(0.0, 0.03, pos) * smoothstep(0.22, 0.03, pos);
+    return line * streak * (0.5 + 0.45 * r2);
   }
 
   void main() {
@@ -232,17 +238,27 @@ export const compositeFragment = /* glsl */ `
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
     color = mix(vec3(luma), color, 0.88);
 
-    // night grade: cool tint + darken
-    if (uNight > 0.5) {
-      vec3 cool = color * vec3(0.55, 0.62, 0.95);
-      color = mix(color, cool, 0.85);
+    // night grade: cool tint + a GENTLE darken. uNight is continuous (0..1) so it
+    // fades smoothly through the cycle (1 = full night, 0 = day). Kept mild so the
+    // bottom of the night reads as a moonlit blue, never a black-out.
+    if (uNight > 0.001) {
+      vec3 cool = color * vec3(0.66, 0.72, 0.96);
+      color = mix(color, cool, 0.5 * clamp(uNight, 0.0, 1.0));
     }
 
-    // rain (two layers)
+    // overcast grade when raining: greyer, cooler, a touch dimmer (no sunshine)
     if (uRain > 0.5) {
-      float r = rainLayer(vUv * vec2(1.0, 1.0), 60.0, 1.6, 0.06);
-      r += rainLayer(vUv * 1.3 + 0.37, 90.0, 2.3, 0.10) * 0.7;
-      color += vec3(0.55, 0.62, 0.7) * r * 0.5;
+      float lo = dot(color, vec3(0.299, 0.587, 0.114));
+      color = mix(color, vec3(lo), 0.28);
+      color *= vec3(0.88, 0.92, 0.98) * 0.95;
+    }
+
+    // rain: gentle, sparse, thin streaks (two faint depth layers) — an
+    // atmospheric drizzle rather than a heavy downpour.
+    if (uRain > 0.5) {
+      float r = rainLayer(vUv, 58.0, 0.8, 0.13, 0.34);
+      r += rainLayer(vUv + vec2(0.37, 0.0), 104.0, 1.05, 0.10, 0.26) * 0.5;
+      color += vec3(0.72, 0.78, 0.86) * r * 0.22;
     }
 
     // film grain (kept subtle at night so it doesn't look like TV static)

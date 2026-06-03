@@ -115,10 +115,13 @@ const COMP_FRAG = /* glsl */ `
   void main() {
     vec3 color = texture2D(tColor, vUv).rgb;
 
-    // paler / airier tone + slight desaturation (mirrors 01 compositeFragment)
-    color = mix(color, vec3(0.95, 0.97, 0.94), 0.11);
+    // paler / airier tone + slight desaturation (mirrors 01 compositeFragment).
+    // Lighter touch than the real-time grade: the path-traced canopy albedo is
+    // already softer than the saturated toon greens, so over-washing here left
+    // it looking grey-green. Pull both terms back so the green stays lively.
+    color = mix(color, vec3(0.95, 0.97, 0.94), 0.07);
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
-    color = mix(vec3(luma), color, 0.88);
+    color = mix(vec3(luma), color, 0.94);
 
     if (uGrain > 0.5) {
       float g = hash(vUv * uRtSize + fract(uTime) * 91.0) - 0.5;
@@ -129,6 +132,30 @@ const COMP_FRAG = /* glsl */ `
     color *= 1.0 - smoothstep(0.6, 1.0, v) * uVignette;
 
     gl_FragColor = vec4(toSRGB(color), 1.0);
+  }
+`;
+
+// PHOTOREAL — report hero-shot path. Bypass the whole pixel-art register
+// (cel bands, outline ink, low-res nearest upscale, airy desaturation wash) and
+// show the path tracer's raw radiance at full resolution: just ACES filmic
+// tonemap + sRGB encode. This is the "what does the GI actually look like"
+// reference image for the report's three-way comparison (PLAN item 9).
+const PHOTOREAL_FRAG = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tColor;
+  uniform float uExposure;
+
+  vec3 aces(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+  }
+  vec3 toSRGB(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+  }
+
+  void main() {
+    vec3 hdr = texture2D(tColor, vUv).rgb * uExposure;
+    gl_FragColor = vec4(toSRGB(aces(hdr)), 1.0);
   }
 `;
 
@@ -190,6 +217,14 @@ export class PixelArtPost {
         uGrain: { value: 1 },
         uVignette: { value: 0.6 },
       },
+    });
+
+    this.photoreal = new THREE.ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: PHOTOREAL_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: { tColor: { value: null }, uExposure: { value: 1 } },
     });
 
     this.quadScene = new THREE.Scene();
@@ -266,6 +301,18 @@ export class PixelArtPost {
     r.setClearColor(prevClear, prevAlpha);
   }
 
+  // Photoreal hero-shot path: blit the traced radiance straight to the canvas
+  // at full resolution through ACES + sRGB only (no cel/outline/pixelation).
+  renderPhotoreal(colorTex, exposure = 1) {
+    const r = this.renderer;
+    this.photoreal.uniforms.tColor.value = colorTex;
+    this.photoreal.uniforms.uExposure.value = exposure;
+    this.quad.material = this.photoreal;
+    r.setRenderTarget(null);
+    r.clear();
+    r.render(this.quadScene, this.quadCamera);
+  }
+
   dispose() {
     this.normalRT.depthTexture?.dispose?.();
     this.normalRT.dispose();
@@ -273,6 +320,7 @@ export class PixelArtPost {
     this.normalMat.dispose();
     this.edge.dispose();
     this.comp.dispose();
+    this.photoreal.dispose();
     this.quad.geometry.dispose();
   }
 }

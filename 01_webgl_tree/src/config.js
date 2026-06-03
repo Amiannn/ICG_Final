@@ -11,6 +11,7 @@ export const settings = {
   rain: false,
   dust: true,
   night: false,
+  cycle: true, // continuous day–night cycle (overrides the Night toggle while on)
   grain: true,
   verticalResolution: 300,
   outlineStrength: 0.0,

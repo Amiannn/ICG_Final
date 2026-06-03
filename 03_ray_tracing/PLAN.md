@@ -294,3 +294,182 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 ### 既有研究文件
 - [`../../term pj/python_raytracer/docs/SIGGRAPH_RESEARCH.md`](../../term%20pj/python_raytracer/docs/SIGGRAPH_RESEARCH.md) — Whitted tracer 角度的研究調查
 - [`../../term pj/python_raytracer/docs/OPTIMIZATIONS.md`](../../term%20pj/python_raytracer/docs/OPTIMIZATIONS.md) — 已落地的 4 個 SIGGRAPH-era 優化
+
+---
+
+## 九、目前進度與接續指南（2026-06-02 更新）
+
+> 開發分支：**`feat/ray-tracing`**（從 main 開出，所有 RT showcase 工作在此 commit，
+> 最後由隊員合併回 main）。在別台電腦接續前先 `git checkout feat/ray-tracing && git pull`。
+
+### 9.1 已完成（含 PLAN 原清單對應）
+
+| 項目 | 狀態 | 檔案 |
+|---|---|---|
+| 1-3 path tracer + pixel-art post + mode 架構 | ✅ | `raytrace_mode.js` / `post_pixelart.js` / `01/src/main.js` |
+| 4 grass/foliage merge 成 static geometry | ✅ | `merge_instances.js` |
+| IBL gradient env（補被丟掉的 HemisphereLight，B4） | ✅ | `raytrace_mode.js`（`GradientEquirectTexture`, `ENV_INTENSITY=1.0`） |
+| Windows/multi-GPU 修復（BVH worker、DoubleSide、dispose bug） | ✅ | commit `98d3801` |
+| 樹葉 NaN 崩潰修復（top skirt `shelfR(1)=0` → `0/0`） | ✅ | `01/src/scene/tree.js`、`merge_instances.js`（non-finite 實例 fail-soft 跳過） |
+| cel ramp 最暗 band 不再壓成純黑（lifted shadow floor 0.22） | ✅ | `post_pixelart.js`（`CEL_SHADOW_FLOOR`） |
+| 樹葉著色法線改朝世界上方（對齊即時 billboard 打光） | ✅ | `merge_instances.js` |
+| 樹冠覆蓋率（2→3 quad asterisk + 1.4x，補滿葉縫看穿問題） | ✅ | `merge_instances.js`（`FOLIAGE_FRAMES`） |
+| **1 樹葉亮度/顏色微調（黑樹冠修復）** | ✅ | `merge_instances.js` + `post_pixelart.js`（見下方說明） |
+| **樹冠雙層（葉感/縫隙/分層回來）** | ✅ | `merge_instances.js` + `raytrace_mode.js`（inner 實心填充 1.15x + outer alpha-cutout 葉片 1.5x） |
+| **樹冠放射狀法線（立體 form shading）** | ✅ | `merge_instances.js`（`NORMAL_UP/RADIAL`，取代全世界上方→不再平面綠） |
+| **8 葉片半透明（Habel 2007 近似）** | ✅ 改用 emissive | `merge_instances.js`（transmission 近似在密集疊片下越疊越黑，改用 Habel 的「additive self-illumination」＝emissive glow floor `0x3c6b28 @0.3`，壓低以免蓋掉 form shading） |
+| **9 寫實 hero shot 對照切換** | ✅ | `raytrace_mode.js`（`#pt-photoreal` 按鈕）+ `post_pixelart.js`（`renderPhotoreal`：bypass cel/outline，純 ACES+sRGB 全解析度輸出） |
+| **7 stratified sampling 確認** | ✅ 確認預設已開 | three-gpu-pathtracer 預設 `RANDOM_TYPE=2`（stratified list，等同 term pj 的 Owen-scrambled Sobol 精神）；Sobol(type1) 會壞 macOS compiler，不動 |
+| **PT 反射水面（path-traced reflections 炫技）** | ✅ | `raytrace_mode.js`（水面不再隱藏，換近鏡面 `MeshPhysicalMaterial` teal/roughness 0.07/ior 1.33，照出天空+樹） |
+| **PT 模式描邊預設開 + 相機偏向水池** | ✅ | `raytrace_mode.js`（`PT_OUTLINE_DEFAULT=1.2`；`TARGET_POND_BIAS` pan 讓水入鏡；FOV 30→33） |
+
+**樹冠由黑變綠、再由「全綠平面」變立體葉感的診斷（路徑追蹤沙箱逐張比對得出）**：
+1. **看穿到黑**：sprig 貼圖是稀疏羽狀 alpha cutout（alphaTest 0.5），真 GI 下相機光線穿過葉縫打到自陰影內部＋
+   棕色 core → 近黑剪影（即時 billboard 永遠面向相機所以看不到）。**第一版解法**是 foliage 丟 cutout 改實心，
+   但變成沒葉感的綠 blob。**最終解法＝雙層**：inner 較小實心填充（保證縫隙不透黑）+ outer alpha-cutout 葉片
+   （葉形/縫隙/分層回來），縫隙看進去是柔和暗綠而非黑。
+2. **全綠平面 → 立體**：所有葉片著色法線原本都設世界上方，path tracer 裡每片葉直接光照**完全相同**→平面綠。
+   改成**依位置放射狀（向外+向上）法線**，向陽面亮、背陽面暗，做出圓樹冠 form shading。
+3. **半透明（item 8）**：transmission 在疊片下越疊越黑；改 Habel 的 additive self-illumination（emissive floor），
+   且**壓到 0x3c6b28 @0.3**（偏暗、低強度），只把最深陰影撐出黑、不蓋掉 form shading。`roughness=1.0` 避免藍 env 反紫。
+   葉色用 per-instance vertex-colour 漸層（dark→warm），`_LIFT` 提亮量降到 0.10 以保留漸層。
+4. **post 去飽和放寬**：COMP grade `mix(luma,color)` 0.88→0.94、airy wash 0.11→0.07，讓綠更跳（只影響 PT 視圖）。
+5. **水**：即時是程序化平面反射 shader（非 PBR，被隱藏）；PT 改成真鏡面 `MeshPhysicalMaterial`，照出天空 env+樹
+   ——正是 path tracer 最能打、即時最難假的賣點。相機 pan 一點向水池讓它入鏡。
+6. **描邊**：cel+ink 是 pixel-art 後處理的精髓，但 outline slider 全域預設 0。PT 模式專屬預設 `1.2`（拉 slider 仍覆蓋、
+   Outlines toggle 關仍關），一進 Path Trace 就有像素美術特色。
+
+**目前 demo 視覺狀態**：樹冠是完整、有葉感、有立體明暗的針葉綠（pixel-art 有描邊特色 / photoreal 有 form shading），
+地面有 path-traced 柔和接觸陰影，水池會反射天空與樹。三張對照圖見 `docs/screenshots/compare_*.png`。
+
+### 9.2 待完成（接續工作，依優先序）
+
+> 註：原 §9.2 的 item 1（樹葉微調）、7（stratified）、9（hero shot）已完成，移到 §9.1。
+
+1. **PLAN 項目 5 — OIDN 降噪**（1 天,效能/畫面最大加成,**下一個最該做**）
+   - 套件：[DennisSmolek/Denoiser](https://github.com/DennisSmolek/Denoiser)（tfjs WebGL backend，首選）。
+   - 需從 path tracer 拉 albedo + normal AOV（`post_pixelart._renderNormals` 已有 normal prepass 可重用,
+     albedo 要另接）。在 `post_pixelart` 之**前**插一層 denoise。目標：4 spp ≈ 32 spp。
+   - 注意 §9.3 B：裝套件請在專案外或小心 lockfile/Vite optimize。
+
+2. **PLAN 項目 6 — Hashed Alpha Testing（Wyman & McGuire 2017）**（半天）
+   - **現況變更**：foliage 已改**雙層**（inner 實心 + outer alpha-cutout，見 §9.1）。outer 仍是硬 alphaTest 0.5，
+     可在此改 stochastic/hashed alpha 讓葉緣更柔；或做**即時端**（real-time billboard shader）注入 hash(worldPos)。
+   - 作法（對應原 PLAN 的 `alpha_leaf.js`）：在 `01/src/materials.js` 的 billboard fragment shader
+     注入 `hash(worldPos)` 當 alpha 門檻取代硬 `alphaTest 0.5`,配合 TAA/累積得到柔邊。報告放即時端一張。
+
+3. **（選）樹冠/水/相機微調**：雙層葉冠 + 放射法線 + 反射水都已落地（§9.1）。若要再推：
+   (a) outer 葉片改 stochastic/hashed alpha 讓葉緣更柔（與 item 6 合併）；
+   (b) 微調 `_LIFT` / `FOLIAGE_LIFT` / emissive 讓樹頂更暖、tier 更分明；
+   (c) 水面加一點波動 normal map 或 clearcoat 讓反射有漣漪；(d) `TARGET_POND_BIAS` / FOV 進一步調構圖。
+
+### 9.3 開發/驗證須知（踩過的雷,務必先讀）
+
+**A. 在自動化/headless 瀏覽器裡 path tracer 會卡在 0 spp(但互動式 Chrome 正常)**
+- 原因:headless 的 GPU process 裡 `KHR_parallel_shader_compile` 的完成狀態永遠不翻 true,
+  導致 `WebGLPathTracer` 的 `isCompiling` 永遠是 true、`pathTracer.update()` 每幀被跳過。
+- 驗證用 workaround:在頁面注入隱藏該擴充(讓 three 的 `compileAsync` 同步 resolve):
+  ```js
+  // puppeteer: page.evaluateOnNewDocument(...)
+  for (const proto of [WebGL2RenderingContext, WebGLRenderingContext]) {
+    const orig = proto.prototype.getExtension;
+    proto.prototype.getExtension = function (n) {
+      return n === "KHR_parallel_shader_compile" ? null : orig.call(this, n);
+    };
+  }
+  ```
+- **這是測試專用、不要寫進 app 程式碼**。真機不需要。
+
+**B. 不要在專案內 `npm install` 臨時測試套件**
+- 改動 `01_webgl_tree/package-lock.json` 會觸發 Vite 重新 optimize deps,中斷時會留下
+  半寫的 `node_modules/.vite/deps_temp_*`,導致 BVH worker 載入失敗:
+  `Uncaught Error: GenerateMeshBVHWorker: undefined`(worker 模組 load error,訊息為 undefined)。
+- 解法:刪 `01_webgl_tree/node_modules/.vite` 後重啟 dev server、hard reload。
+- 測試瀏覽器(puppeteer)請裝在**專案外的獨立資料夾**(見 C)。
+
+**C. 沙箱截圖驗證流程(每改一步自己截圖比對)**
+- 在專案外建獨立 puppeteer 環境,避免污染專案 lockfile:
+  ```bash
+  mkdir -p ~/pptr-sandbox && cd ~/pptr-sandbox
+  npm init -y && npm i puppeteer-core@23
+  ```
+- 啟動 dev server:`cd 01_webgl_tree && npm run dev`(注意實際 port,常被佔用而跳 5174/5175)。
+- 截圖腳本要點:headful + 反節流 flags(`--disable-renderer-backgrounding` 等)+ 上面 A 的
+  擴充隱藏 + 點 `.mode[data-mode="raytrace"]` + 輪詢 `#pt-hud` 的 spp 到 ~48 + 截圖。
+  收斂約 10-15 秒(transmission 會稍慢)。
+- 指向正確的 `http://localhost:<port>/`。
+
+### 9.4 關鍵檔案地圖
+- `03_ray_tracing/src/raytrace_mode.js` — mode plugin:hide instanced/points(水**不**隱藏)→
+  merge billboards(grass 1 層;foliage **2 層** inner 實心 1.15x + outer cutout 1.5x)→ 水換近鏡面
+  `MeshPhysicalMaterial`(1c)→ 其餘換 MeshStandardMaterial → IBL env → perspective cam(`TARGET_POND_BIAS`
+  pan 向水池)→ `WebGLPathTracer`(stratified,§9.1 item 7)+ BVH worker → 每 frame `renderSample` + post。
+  `#pt-photoreal` 按鈕切 pixel-art / photoreal;`PT_OUTLINE_DEFAULT` 讓描邊預設開。
+- `03_ray_tracing/src/merge_instances.js` — billboard→static crossed-quad 烘焙;`FRAMES`(grass 2 quad)
+  / `FOLIAGE_FRAMES`(foliage 3 quad asterisk);參數 `foliage`(放射法線+emissive+lift)、`cutout`(map+alphaTest
+  vs 實心)、`sizeScale`。foliage 放射狀法線 `NORMAL_UP/RADIAL` 做 form shading;`_LIFT`/`FOLIAGE_LIFT` 提亮漸層。
+- `03_ray_tracing/src/post_pixelart.js` — `render()`:cel ramp(含 `CEL_SHADOW_FLOOR`)+ outline + low-res
+  upscale + COMP grade(去飽和已放寬);`renderPhotoreal()`:bypass 全部,純 ACES+sRGB 全解析度(hero shot)。
+- `01_webgl_tree/src/scene/tree.js` — 樹幾何;foliage instance 生成(droop 已修 `R>0` 防 NaN)。
+- 驗證沙箱:`~/pptr-sandbox/shot.mjs`(headful + KHR ext hider,`--mode/--spp/--clicks/--motionoff/--clean/--outline`)。
+
+---
+
+## 十、寫實 Path Tracing 升級(2026-06-03)
+
+> 背景:使用者覺得舊 PT「被 pixel art 限制、沒有光追真實感」。曾試 Minecraft 體素路徑追蹤
+> (realtime toggle),但體素風格化、非寫實,使用者否決並要求**刪除**(`voxel_rt/` 已移除)。
+> 最終方向:**保留 `Path Trace` mode 按鈕**(`01_webgl_tree` 不動),把 photoreal 路徑做到位。
+> 真實感的天花板是**幾何**(billboard 葉片 + 低多邊形),不是 renderer。
+
+### 10.1 改了什麼(全在 03)
+- **`sky_env.js`(新)** `makeSkyEnv()`:程序化 equirectangular 天空 HDR(Float DataTexture)——
+  藍天頂→暖地平漸層 + 真實太陽盤 + 暗地面半球。取代舊的平面綠漸層(整場一片綠的元凶);
+  方向慣例對齊 three equirect 取樣(u=atan2(z,x)/2π+.5、v=asin(y)/π+.5)讓太陽在反射裡對位。
+- **光照(raytrace_mode §3)**:場景 DirectionalLight 重指向**低角度暖金 key**
+  (`ptSunDir≈(0.82,0.33,0.46)`、色 0xffdca6、intensity 3.8;dispose 還原)→ 側光立體 + 長投影。
+  天空 env 當**冷色 fill + 反射 + 背景**(`environmentIntensity 0.8`)。
+  決策:env-only sun 會被大片天空 dome 洗掉(太陽 solid angle 太小);delta 方向光當 key 才有對比。
+- **景深 DoF(PhysicalCamera)**:macro/移軸感,順便柔化卡片葉子的破碎感。
+  **坑**:three-gpu-pathtracer 光圈 = `bokehSize*1e-3`(假設 mm 尺度),本場景 ~40 units,
+  要用極小 f-stop:`fStop=0.008` 適中、`0.005` 強、`0.02` 幾乎看不出;focusDistance 每幀對到樹。
+- **`detail_textures.js`(新)**:canvas value-noise fBm 生 albedo+normal。
+  ground=草地(斑塊綠+乾草+細 relief,repeat 20),trunk/branches/core=樹皮(垂直紋,repeat 2.5×3)。
+  normal map 接住低角度 key → 真實表面起伏,去掉「平面塑膠」感(path tracer 支援 normalMap)。
+- **樹冠(merge_instances)**:FOLIAGE_PUFF 8→16、卡片更小更密、emissive 0.5→0.22;
+  raytrace_mode 再疊一層 **cutout 葉片細節**(solid:false、sizeScale 1.5)讓邊緣是葉形不是矩形。
+- **水**:沿用前景近鏡面 MeshPhysicalMaterial,現在照出真天空 + 太陽 glint。
+
+### 10.2 驗證
+`~/pptr-sandbox/shot.mjs --mode=raytrace --clicks=#pt-photoreal --spp=220 --motionoff --clean --url=http://localhost:5173/`
+(dev server 常在 :5173/:5174)。photoreal 收斂約 35s / 220 spp。
+
+### 10.3 待續(真實感再往上 = 幾何/材質資產級)
+1. 葉片用真實小葉幾何(PT 不吃 instance,要 bake 成 static)。
+2. 石頭/地面更高解析 normal、AO map。
+3. OIDN 降噪(PLAN item 5)→ 低 spp 更乾淨、可動。
+4. DoF 強度/構圖 microadjust;可接 UI 滑桿。
+
+### 10.4 第二輪(2026-06-03,使用者:樹別用卡片、別太糊、PT 走純寫實)
+- **PT 改 photoreal-only**:移除 pixel-art post 分支 + `◻ Photoreal` 切換鈕;`render()` 永遠
+  `renderPhotoreal()`。cel/outline 像素風只留在 `01` 即時視圖。
+- **樹冠改真 3D 幾何**:`merge_instances.buildFoliageClumps()` — 每個 sprig anchor 噴出
+  ~22 根細 **needle 針葉**(細又短的 4 面 open cone,有尖端、朝外+下垂、flat-shaded),
+  green-by-height 漸層(dark base→warm crown)。取代醜的 billboard 卡片,像真針葉樹。
+  (演進:圓 icosa clump→花椰菜;拉長 icosa→兩端圓的「豆子」;最後 pointed cone 短+細+密 才像針葉。)
+- 其他優化:grass card 縮短(sizeScale 0.72)當低草坪;bark 調冷灰(少橘)。
+- **銳利度**:`renderScale 0.75→1.0`(全解析,0.75 看起來糊)、DoF 調到 `fStop 0.07`(幾乎全清,
+  只遠景微柔)。
+- **水面鏡面**:dielectric(ior)從俯角只反射 ~10% → 像死板 teal 色塊。改 **metallic mirror**
+  (`metalness 0.92, roughness 0.02, color 0x8fc0cc, clearcoat 1`)讓反射主導 → 亮鏡面湖;
+  env 太陽盤 `9→16` 給水面 sun glint。(非物理,但這是要的亮鏡面湖。)
+- **水波(真實水感)**:平鏡面像玻璃/金屬、沒「光照感」。加 `makeWaterNormal()` 程序化波紋
+  normal map(整數頻率正弦波疊加,可無縫 tiling)→ 打散反射 + 把太陽散成閃爍高光。
+  pond 幾何無 uv,於 raytrace_mode 由 local XY 補平面 uv(dispose 時移除)。normalScale 0.32。
+- **坑(重要)**:three-gpu-pathtracer 場景 merge 的 color attribute 是 **itemSize 4 (RGBA)**;
+  clump 若用 itemSize 3 會 mismatch → 葉子洗成白色。必須寫 RGBA(alpha=1)。
+- **DoF 調弱**:`fStop 0.008→0.03`(使用者嫌太糊,改成只有遠近輕微分離)。
+- **避免雙重 key**:env 太陽盤 `sunIntensity 60→9`(只當反射 glint),方向光才是唯一 key,
+  否則漫反射被打兩次光 → ACES 白肩洗白。
+- **PT 關 fog**:`scene.fog=null`(dispose 還原)。即時霧是固定淡灰,壓暗光照後會洗灰整張。
+- **曝光控制**:`renderPhotoreal(tex, exposure)`,exposure 0.6 讓葉子落在飽和中間調。

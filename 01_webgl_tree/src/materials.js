@@ -16,6 +16,15 @@ export const cloudUniforms = {
   uCloudDir: { value: new THREE.Vector2(0.6, 0.2) },
 };
 
+// Shared wind, injected by reference into every billboard (grass + foliage) so a
+// single update sways the whole scene. The billboard top leans in uWindDir by an
+// amount that ripples across the meadow, with the base pinned — "風吹草動".
+export const windUniforms = {
+  uWindTime: { value: 0 },
+  uWindStrength: { value: 0.12 },
+  uWindDir: { value: new THREE.Vector2(0.85, 0.32).normalize() },
+};
+
 const CLOUD_COMMON = /* glsl */ `
   uniform sampler2D uCloudMap;
   uniform float uCloudTime;
@@ -131,6 +140,15 @@ export function instancedBillboardMaterial(map, { color = 0xffffff, upright = fa
   mat.onBeforeCompile = (shader) => {
     injectCloudShadows(shader);
 
+    // shared wind uniforms (by reference) + declarations at vertex global scope
+    shader.uniforms.uWindTime = windUniforms.uWindTime;
+    shader.uniforms.uWindStrength = windUniforms.uWindStrength;
+    shader.uniforms.uWindDir = windUniforms.uWindDir;
+    shader.vertexShader = shader.vertexShader.replace(
+      "varying vec3 vCloudWorldPos;",
+      "varying vec3 vCloudWorldPos;\n  uniform float uWindTime;\n  uniform float uWindStrength;\n  uniform vec2 uWindDir;",
+    );
+
     shader.vertexShader = shader.vertexShader.replace(
       "#include <project_vertex>",
       `
@@ -146,6 +164,11 @@ export function instancedBillboardMaterial(map, { color = 0xffffff, upright = fa
         sy = length(instanceMatrix[1].xyz);
       #endif
       ${expand}
+      // wind: lean the billboard top (base pinned), rippling across the meadow
+      float swayH = clamp(position.y + 0.5, 0.0, 1.0) * sy;
+      float wsway = sin(uWindTime * 1.1 + anchorWorld.x * 0.5 + anchorWorld.z * 0.4) * 0.6
+                  + sin(uWindTime * 1.9 + anchorWorld.x * 0.27 - anchorWorld.z * 0.6) * 0.4;
+      worldPos.xz += uWindDir * (wsway * uWindStrength * swayH);
       vec4 mvPosition = viewMatrix * vec4(worldPos, 1.0);
       gl_Position = projectionMatrix * mvPosition;
       vCloudWorldPos = anchorWorld;
