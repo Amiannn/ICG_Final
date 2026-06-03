@@ -412,3 +412,43 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
   upscale + COMP grade(去飽和已放寬);`renderPhotoreal()`:bypass 全部,純 ACES+sRGB 全解析度(hero shot)。
 - `01_webgl_tree/src/scene/tree.js` — 樹幾何;foliage instance 生成(droop 已修 `R>0` 防 NaN)。
 - 驗證沙箱:`~/pptr-sandbox/shot.mjs`(headful + KHR ext hider,`--mode/--spp/--clicks/--motionoff/--clean/--outline`)。
+
+---
+
+## 十、寫實 Path Tracing 升級(2026-06-03)
+
+> 背景:使用者覺得舊 PT「被 pixel art 限制、沒有光追真實感」。曾試 Minecraft 體素路徑追蹤
+> (realtime toggle),但體素風格化、非寫實,使用者否決並要求**刪除**(`voxel_rt/` 已移除)。
+> 最終方向:**保留 `Path Trace` mode 按鈕**(`01_webgl_tree` 不動),把 photoreal 路徑做到位。
+> 真實感的天花板是**幾何**(billboard 葉片 + 低多邊形),不是 renderer。
+
+### 10.1 改了什麼(全在 03)
+- **`sky_env.js`(新)** `makeSkyEnv()`:程序化 equirectangular 天空 HDR(Float DataTexture)——
+  藍天頂→暖地平漸層 + 真實太陽盤 + 暗地面半球。取代舊的平面綠漸層(整場一片綠的元凶);
+  方向慣例對齊 three equirect 取樣(u=atan2(z,x)/2π+.5、v=asin(y)/π+.5)讓太陽在反射裡對位。
+- **光照(raytrace_mode §3)**:場景 DirectionalLight 重指向**低角度暖金 key**
+  (`ptSunDir≈(0.82,0.33,0.46)`、色 0xffdca6、intensity 3.8;dispose 還原)→ 側光立體 + 長投影。
+  天空 env 當**冷色 fill + 反射 + 背景**(`environmentIntensity 0.8`)。
+  決策:env-only sun 會被大片天空 dome 洗掉(太陽 solid angle 太小);delta 方向光當 key 才有對比。
+- **景深 DoF(PhysicalCamera)**:macro/移軸感,順便柔化卡片葉子的破碎感。
+  **坑**:three-gpu-pathtracer 光圈 = `bokehSize*1e-3`(假設 mm 尺度),本場景 ~40 units,
+  要用極小 f-stop:`fStop=0.008` 適中、`0.005` 強、`0.02` 幾乎看不出;focusDistance 每幀對到樹。
+- **`detail_textures.js`(新)**:canvas value-noise fBm 生 albedo+normal。
+  ground=草地(斑塊綠+乾草+細 relief,repeat 20),trunk/branches/core=樹皮(垂直紋,repeat 2.5×3)。
+  normal map 接住低角度 key → 真實表面起伏,去掉「平面塑膠」感(path tracer 支援 normalMap)。
+- **樹冠(merge_instances)**:FOLIAGE_PUFF 8→16、卡片更小更密、emissive 0.5→0.22;
+  raytrace_mode 再疊一層 **cutout 葉片細節**(solid:false、sizeScale 1.5)讓邊緣是葉形不是矩形。
+- **水**:沿用前景近鏡面 MeshPhysicalMaterial,現在照出真天空 + 太陽 glint。
+
+### 10.2 驗證
+`~/pptr-sandbox/shot.mjs --mode=raytrace --clicks=#pt-photoreal --spp=220 --motionoff --clean --url=http://localhost:5173/`
+(dev server 常在 :5173/:5174)。photoreal 收斂約 35s / 220 spp。
+
+### 10.3 待續(真實感再往上 = 幾何/材質資產級)
+1. 葉片用真實小葉幾何(PT 不吃 instance,要 bake 成 static)。
+2. 石頭/地面更高解析 normal、AO map。
+3. OIDN 降噪(PLAN item 5)→ 低 spp 更乾淨、可動。
+4. DoF 強度/構圖 microadjust;可接 UI 滑桿。
+
+> 註:pixel-art 視圖(同 mode 的非-photoreal)現也吃 sky/golden key/DoF/dense canopy;
+> 若要 pixel-art 維持原樣,需把這些參數對兩種輸出分離。

@@ -1,8 +1,10 @@
 import * as THREE from "three";
-import { WebGLPathTracer, GradientEquirectTexture } from "three-gpu-pathtracer";
+import { WebGLPathTracer, PhysicalCamera } from "three-gpu-pathtracer";
 import { GenerateMeshBVHWorker } from "three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js";
 import { PixelArtPost } from "./post_pixelart.js";
 import { mergeBillboardsToMesh } from "./merge_instances.js";
+import { makeSkyEnv } from "./sky_env.js";
+import { makeGrassTextures, makeBarkTextures, disposeTextures } from "./detail_textures.js";
 
 // 03 · Path-traced view of the Pixel Bonsai scene.
 //
@@ -31,19 +33,24 @@ import { mergeBillboardsToMesh } from "./merge_instances.js";
 
 const PERSP_FOV_DEG = 33;
 const PERSP_DIST_SCALE = 2.05; // pull eye back so the narrow FOV roughly matches the ortho extent
-const TARGET_POND_BIAS = 0.16; // shift the look-at slightly toward the pond so the reflective water reads in frame
+const TARGET_POND_BIAS = 0.2; // look-down bias toward the relocated foreground pond so it stays framed
+const WATER_FOREGROUND_DIST = 9.5; // how far in front of the tree (toward camera) to relocate the pond in PT mode
 
-// Pixel-art outline strength used in path-trace mode when the user hasn't set the
-// outline slider (its global default is 0). The cel-quantise + ink-edge pass is
-// the whole point of the pixel-art register, so default it ON here for character;
-// dragging the slider still overrides, and toggling Outlines off still kills it.
-const PT_OUTLINE_DEFAULT = 1.2;
+// Outline is OFF by default in path-trace mode, matching the real-time view
+// (whose outline slider also defaults to 0 — its pixel-art look comes from the
+// cel ramp + low-res, not ink edges). Forcing an outline on the path-traced
+// scene inked the trunk/branches through the soft canopy in a distracting way.
+// The user can still drag the Outline slider to add edges if they want.
 
-// Sky / ground colours for the IBL gradient (replaces the dropped HemisphereLight).
-const ENV_SKY_COLOR = 0xbfe0df; // palette.skyDay
-const ENV_GROUND_COLOR = 0x6f8a52; // hemisphere groundColor (grassy fill)
-const ENV_INTENSITY = 1.0; // fill + GI; replaces the dropped HemisphereLight (intensity 1.3), so vertical tree surfaces aren't left near-black
-const SURFACE_ROUGHNESS = 0.7; // a touch glossy so the env actually reflects (sheen / RT cue)
+// Environment lighting is now a baked sky+sun HDR (see sky_env.js): a blue
+// dome, warm pale horizon, and a bright warm SUN DISK at the real sun
+// direction. The path tracer importance-samples it, so the sun is the key
+// light (warm directional shading + soft shadows + a glint in the pond) and the
+// blue sky fills shadows cool — instead of the old flat-green gradient. With a
+// real sun in the env we ZERO the scene's DirectionalLight in this mode so the
+// sun isn't double-counted (restored on dispose).
+const ENV_INTENSITY = 1.0;
+const SURFACE_ROUGHNESS = 0.65; // a touch glossy so the env actually reflects (sheen / RT cue)
 
 let _state = null;
 
@@ -64,6 +71,7 @@ export const raytraceMode = {
       matSwap: [], // [{ obj, original }]
       merged: [], // [{ mesh, parent }] static stand-ins for instanced foliage/grass (M4)
       envTex: null, // generated gradient IBL, disposed on exit
+      waterPos: null, // original pond position, restored on dispose (we relocate it to the foreground)
 
       perspCam: null,
       pathTracer: null,
@@ -103,46 +111,82 @@ export const raytraceMode = {
         _state.merged.push({ mesh, parent: obj.parent });
         continue;
       }
-      // Tree canopy: two layers. A solid inner filler sized just inside the
-      // leaves so see-through gaps reveal soft shadowed green (never black), plus
-      // a leafy alpha-cutout outer shell that restores the sprig silhouette and
-      // tier separation of the real-time view.
-      const inner = mergeBillboardsToMesh(obj, {
+      // Tree canopy: each sprig explodes into a scattered puff of small SOLID
+      // leaf cards (see merge_instances). Solid (not the feathery cutout texture,
+      // which has too little opaque area to ever fill — a sparse cutout canopy
+      // just vanishes to black under GI). Kept FEW + small so the canopy stays
+      // open/sparse like the real-time view: the small green clumps leave gaps
+      // that show the lit trunk/branches through them, instead of a dense bush.
+      const leaves = mergeBillboardsToMesh(obj, {
         roughness: SURFACE_ROUGHNESS,
         foliage: true,
-        cutout: false,
-        sizeScale: 1.15,
+        solid: true,
+        sizeScale: 1.2,
       });
-      const outer = mergeBillboardsToMesh(obj, {
+      obj.parent.add(leaves);
+      _state.merged.push({ mesh: leaves, parent: obj.parent });
+
+      // Leaf-silhouette detail layer: cutout cards (sprig alpha) slightly larger
+      // than the solid backing, so the canopy edge reads as individual leaves
+      // rather than card rectangles. Cutout gaps land on the solid green backing
+      // (never the dark interior), so it adds detail without going black.
+      const leafDetail = mergeBillboardsToMesh(obj, {
         roughness: SURFACE_ROUGHNESS,
         foliage: true,
-        cutout: true,
+        solid: false,
         sizeScale: 1.5,
       });
-      obj.parent.add(inner, outer);
-      _state.merged.push({ mesh: inner, parent: obj.parent }, { mesh: outer, parent: obj.parent });
+      obj.parent.add(leafDetail);
+      _state.merged.push({ mesh: leafDetail, parent: obj.parent });
     }
 
-    // 1c. Path-traced water. The real-time pond is a custom planar-reflection
-    //     shader; here we hand the path tracer a near-mirror MeshPhysicalMaterial
-    //     so it computes *true* reflections of the sky env + tree (the showcase
-    //     the real-time fake approximates). Opaque + low roughness reads as a
-    //     calm reflective pond; we don't add transmission because there is no
-    //     pond-floor geometry, so a see-through surface would reveal the world
-    //     background like a hole. Swapped before the generic pass below so that
-    //     pass skips it; restored from matSwap on dispose.
-    if (world.water && world.water.mesh) {
+    // 1c. Path-traced water. Two parts:
+    //
+    //   • Reposition. The scene's pond sits far to the left of the tree and falls
+    //     completely outside the path-trace camera framing — so it never showed.
+    //     In path-trace mode we relocate it into the FOREGROUND, in front of the
+    //     tree toward the camera, so it's clearly in frame and the tree reflects
+    //     in it. (PT-only; the original position is restored on dispose so the
+    //     real-time planar-reflection pond is untouched.)
+    //
+    //   • Material. The real-time pond is a custom planar-reflection shader; here
+    //     we hand the path tracer a near-mirror MeshPhysicalMaterial so it
+    //     computes TRUE reflections of the sky env + tree (the showcase the
+    //     real-time fake approximates). Deep blue-teal base + clearcoat so it
+    //     reads as water, not flat ground; no transmission (there's no pond-floor
+    //     geometry, so a see-through surface would reveal the background).
+    //     Swapped before the generic pass below so that pass skips it; both the
+    //     material and the position are restored on dispose.
+    if (world.water && world.water.mesh && world.tree) {
       const wm = world.water.mesh;
+      const eye = ctx.pixel.eyeOffset;
+      const hlen = Math.hypot(eye.x, eye.z) || 1;
+      _state.waterPos = wm.position.clone();
+      wm.position.set(
+        world.tree.position.x + (eye.x / hlen) * WATER_FOREGROUND_DIST,
+        wm.position.y,
+        world.tree.position.z + (eye.z / hlen) * WATER_FOREGROUND_DIST,
+      );
+
       const waterMat = new THREE.MeshPhysicalMaterial({
-        color: 0x35787f, // deep teal tint where the dielectric isn't reflecting
-        roughness: 0.07, // near-mirror; a touch of roughness tames fireflies
+        color: 0x1d4e5a, // deep blue-teal water
+        roughness: 0.04, // sharp mirror reflection
         metalness: 0.0,
-        ior: 1.33, // water — Fresnel reflects strongly at the grazing pond angle
+        ior: 1.33, // water — Fresnel reflects strongly at grazing angles
+        clearcoat: 1.0, // wet glossy top layer
+        clearcoatRoughness: 0.06,
         side: THREE.DoubleSide,
       });
       _state.matSwap.push({ obj: wm, original: wm.material });
       wm.material = waterMat;
     }
+
+    // Procedural detail textures (albedo + normal): grass for the ground, bark
+    // for the trunk. Path tracing can't invent surface detail, so we bake some —
+    // the normal maps catch the low golden key and read as real relief instead
+    // of flat plastic (the biggest "this isn't real" tell).
+    _state.grassTex = makeGrassTextures();
+    _state.barkTex = makeBarkTextures();
 
     // 2. Swap MeshToonMaterial / ShaderMaterial → MeshStandardMaterial.
     scene.traverse((obj) => {
@@ -160,21 +204,93 @@ export const raytraceMode = {
         metalness: 0.0,
         envMapIntensity: 1.0,
       });
+
+      // Ground: tiling grass albedo + normal relief.
+      if (obj === world.ground) {
+        const g = _state.grassTex;
+        std.map = g.map;
+        std.normalMap = g.normalMap;
+        std.map.repeat.set(20, 20);
+        std.normalMap.repeat.set(20, 20);
+        std.normalScale.set(0.9, 0.9);
+        std.color.set(0xffffff); // let the texture carry the colour
+        std.roughness = 0.96;
+      }
+
       _state.matSwap.push({ obj, original: m });
       obj.material = std;
     });
 
-    // 3. Environment lighting. The path tracer ignores the HemisphereLight
-    //    (see B4), so without this the scene is lit by the bare sun and looks
-    //    flat. A gradient sky→ground equirect gives image-based fill + GI and
-    //    converges much faster/cleaner than the lone directional light.
-    const env = new GradientEquirectTexture(512);
-    env.topColor.set(ENV_SKY_COLOR);
-    env.bottomColor.set(ENV_GROUND_COLOR);
-    env.exponent = 1.5;
-    env.update();
+    // 2b. Lift the tree's woody parts (trunk / branches / core) out of GI-black.
+    //     With the canopy now sparse + open, the trunk shows through the gaps —
+    //     but GI leaves it a dark void deep in the canopy shadow, unlike the
+    //     real-time toon ramp. A dim warm-brown emissive floor makes it read as
+    //     lit wood through the foliage, like the real-time view. Targets only the
+    //     swapped meshes under world.tree (not the green foliage puffs, which
+    //     aren't in matSwap, nor rocks/ground/flowers, which aren't under tree).
+    for (const { obj } of _state.matSwap) {
+      let p = obj;
+      let inTree = false;
+      while (p) {
+        if (p === world.tree) {
+          inTree = true;
+          break;
+        }
+        p = p.parent;
+      }
+      if (inTree && obj.material && obj.material.isMeshStandardMaterial) {
+        obj.material.emissive = new THREE.Color(0x3a2a1c);
+        obj.material.emissiveIntensity = 0.4;
+        // bark albedo + vertical-ridge normal on the woody parts
+        const b = _state.barkTex;
+        obj.material.map = b.map;
+        obj.material.normalMap = b.normalMap;
+        b.map.repeat.set(2.5, 3.0);
+        b.normalMap.repeat.set(2.5, 3.0);
+        obj.material.normalScale.set(0.8, 0.8);
+        obj.material.color.set(0xffffff);
+        obj.material.roughness = 0.9;
+        obj.material.needsUpdate = true;
+      }
+    }
+
+    // 3. Lighting. Two parts working together for a photoreal golden-hour look:
+    //
+    //   • KEY = the scene's DirectionalLight, repointed LOW + front-right and
+    //     warmed up. The real-time sun is near-overhead (flat); a low sun gives
+    //     side-lit form + long soft shadows. A directional (delta) light is a
+    //     near-free, noise-free key the tracer samples efficiently — far better
+    //     than relying on a tiny-solid-angle env sun (which a big sky dome just
+    //     washes out). Repointed only for this mode; restored on dispose.
+    //   • FILL + REFLECTIONS = the baked sky env (sky_env.js): a deep-blue dome
+    //     fading to a warm horizon = cool shadow fill, plus a bright sun disk at
+    //     the SAME direction so the pond + glossy surfaces show a real sky with a
+    //     sun glint, and the background is a true sky.
+    const ptSunDir = new THREE.Vector3(0.82, 0.33, 0.46).normalize();
+
+    _state.prevSunPos = ctx.lighting.sun.position.clone();
+    _state.prevSunColor = ctx.lighting.sun.color.clone();
+    _state.prevSunIntensity = ctx.lighting.sun.intensity;
+    ctx.lighting.sun.position.copy(ptSunDir).multiplyScalar(20);
+    ctx.lighting.sun.color.setHex(0xffdca6); // warm golden key
+    ctx.lighting.sun.intensity = 3.8;
+    ctx.lighting.sun.target.position.set(0, 0, 0);
+    ctx.lighting.sun.target.updateMatrixWorld();
+    ctx.lighting.sun.updateMatrixWorld();
+
+    const env = makeSkyEnv(ptSunDir, {
+      skyIntensity: 0.65,
+      sunColor: [1.0, 0.86, 0.6],
+      sunIntensity: 60.0, // for the pond glint / glossy reflections, not the key
+      sunAngularDeg: 2.0,
+      zenith: [0.09, 0.24, 0.58],
+      horizon: [0.52, 0.62, 0.74],
+      ground: [0.16, 0.16, 0.13],
+    });
     scene.environment = env;
-    scene.environmentIntensity = ENV_INTENSITY;
+    scene.environmentIntensity = 0.8; // cool sky fill in shadow, secondary to the key
+    _state.prevBackground = scene.background;
+    scene.background = env; // show the real sky behind the scene
     _state.envTex = env;
 
     // 4. Renderer setup. Tonemapping is done in the post chain's edge shader
@@ -183,13 +299,23 @@ export const raytraceMode = {
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.autoClear = true;
 
-    // 5. Build a perspective camera approximating the existing iso framing.
-    const persp = new THREE.PerspectiveCamera(
+    // 5. Build a physical camera approximating the existing iso framing, with a
+    //    shallow-ish depth of field. Focus sits on the tree; the foreground pond
+    //    and the far ground fall slightly out of focus — the bokeh is a strong
+    //    "this is a render" cue and reads as a tasteful tilt-shift on the diorama.
+    const persp = new PhysicalCamera(
       PERSP_FOV_DEG,
       renderer.domElement.clientWidth / renderer.domElement.clientHeight,
       0.5,
       200,
     );
+    // three-gpu-pathtracer scales the aperture by bokehSize*1e-3 (assumes a
+    // millimetre-scale scene); our scene is ~40 units, so a "normal" f-stop gives
+    // sub-pixel blur. Use a very low f-stop to get a real shallow DoF — the
+    // foreground pond + far ground blur to soft bokeh, tree stays sharp.
+    persp.fStop = 0.008;
+    persp.apertureBlades = 6;
+    persp.focusDistance = 40; // refined to the eye→tree distance each frame in _syncCamera
     _state.perspCam = persp;
     this._syncCamera(ctx);
 
@@ -201,10 +327,10 @@ export const raytraceMode = {
     //   — we sample that same texture in the M3 pixel-art post chain and draw
     //   over the canvas, so the proven path is untouched and we still restyle.
     const tracer = new WebGLPathTracer(renderer);
-    tracer.bounces = 4;
+    tracer.bounces = 5;
     tracer.multipleImportanceSampling = true;
-    tracer.renderScale = 0.6;
-    tracer.tiles.set(2, 2);
+    tracer.renderScale = 0.75;
+    tracer.tiles.set(3, 3);
     tracer.renderToCanvas = true;
     tracer.filterGlossyFactor = 0.5; // clamp glossy fireflies -> faster perceptual convergence
     // Sampling (PLAN item 7). three-gpu-pathtracer's PhysicalPathTracingMaterial
@@ -269,11 +395,7 @@ export const raytraceMode = {
         const displayW = Math.max(1, Math.round(displayH * (bufW / bufH)));
         _state.post.setSize(displayW, displayH);
 
-        const outline = settings.outlines
-          ? settings.outlineStrength > 0
-            ? settings.outlineStrength
-            : PT_OUTLINE_DEFAULT
-          : 0;
+        const outline = settings.outlines ? settings.outlineStrength : 0;
         _state.post.render({
           colorTex: _state.pathTracer.target.texture,
           scene,
@@ -324,10 +446,22 @@ export const raytraceMode = {
       obj.material = original;
     }
 
-    // Restore the scene's environment lighting and free the generated gradient.
+    // Restore the pond to its original (off-frame) position for the other modes.
+    if (_state.waterPos && ctx.world.water && ctx.world.water.mesh) {
+      ctx.world.water.mesh.position.copy(_state.waterPos);
+    }
+
+    // Restore the scene's environment lighting and free the generated sky.
     ctx.scene.environment = _state.prevEnvironment;
     ctx.scene.environmentIntensity = _state.prevEnvIntensity;
+    if (_state.prevBackground !== undefined) ctx.scene.background = _state.prevBackground;
+    if (_state.prevSunPos) ctx.lighting.sun.position.copy(_state.prevSunPos);
+    if (_state.prevSunColor) ctx.lighting.sun.color.copy(_state.prevSunColor);
+    if (_state.prevSunIntensity !== undefined) ctx.lighting.sun.intensity = _state.prevSunIntensity;
+    ctx.lighting.sun.updateMatrixWorld();
     if (_state.envTex) _state.envTex.dispose();
+    disposeTextures(_state.grassTex);
+    disposeTextures(_state.barkTex);
 
     if (_state.hud) _state.hud.remove();
     if (_state.photorealBtn) _state.photorealBtn.remove();
@@ -409,12 +543,12 @@ export const raytraceMode = {
     const persp = _state.perspCam;
     const eyeOffset = ctx.pixel.eyeOffset;
 
-    // Pan the look-at slightly toward the pond so the reflective water reads in
-    // frame (the tree alone leaves it cut off at the edge). This translates both
-    // eye and target by the same delta, so it's a pan, not a rotation.
+    // Pan/tilt the look-at slightly toward the relocated foreground pond so the
+    // reflective water sits clearly in the lower frame. This translates both eye
+    // and target by the same delta, so it's a pan, not a rotation.
     const target = ctx.pixel.desiredTarget.clone();
-    if (ctx.world && ctx.world.water) {
-      target.lerp(ctx.world.water.center, TARGET_POND_BIAS);
+    if (ctx.world && ctx.world.water && ctx.world.water.mesh) {
+      target.lerp(ctx.world.water.mesh.position, TARGET_POND_BIAS);
     }
 
     const eye = eyeOffset.clone().normalize().multiplyScalar(eyeOffset.length() * PERSP_DIST_SCALE);
@@ -425,6 +559,12 @@ export const raytraceMode = {
     if (Math.abs(persp.aspect - aspect) > 1e-4) {
       persp.aspect = aspect;
       persp.updateProjectionMatrix();
+      dirty = true;
+    }
+    // Keep focus locked on the tree (target) for the depth-of-field blur.
+    const focus = eyePos.distanceTo(target);
+    if (persp.focusDistance !== undefined && Math.abs(persp.focusDistance - focus) > 0.05) {
+      persp.focusDistance = focus;
       dirty = true;
     }
     if (!_state.lastEyeWorld.equals(eyePos) || !_state.lastTargetWorld.equals(target)) {
