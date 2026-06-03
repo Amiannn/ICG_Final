@@ -57,6 +57,12 @@ currentMode.init(ctx);
 initUI(onSettingChange, switchMode);
 applyAllSettings();
 
+// Dev hook: `?mode=raytrace` (or growth/growthmorph) jumps straight into that
+// mode on load — handy for headless-screenshot scripts and quick deep links.
+const _qMode = new URLSearchParams(location.search).get("mode");
+if (_qMode && modes[_qMode] && modes[_qMode] !== currentMode) switchMode(_qMode);
+window.__mode = switchMode;
+
 // debug/scrub hook: freeze the cycle and set a specific time-of-day (0..1)
 window.__tod = (t) => {
   settings.cycle = false;

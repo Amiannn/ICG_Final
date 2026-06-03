@@ -159,6 +159,110 @@ const PHOTOREAL_FRAG = /* glsl */ `
   }
 `;
 
+// PIXEL BLIT — the only "pixel-art" mechanism kept in the cel-style PT path.
+// The path tracer is configured to render into a LOW-RES target (height ≈
+// settings.verticalResolution). This shader blits that into the canvas with
+// explicit nearest sampling — UVs snap to the source texel grid so output is
+// crisp blocky pixels independent of texture filter state — and runs the same
+// ACES + sRGB encode the photoreal blit uses. No cel quantisation, no outline,
+// no grade: we trust the path-traced lighting itself to carry the look, and
+// pixel-art only contributes the chunky resolution.
+const PIXEL_BLIT_FRAG = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tColor;
+  uniform vec2 uSrcSize;
+  uniform float uExposure;
+
+  vec3 aces(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+  }
+  vec3 toSRGB(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+  }
+
+  void main() {
+    // explicit nearest UV — quantise the read position to the centre of the
+    // nearest low-res texel, so this is crisp regardless of how the source
+    // texture's min/magFilter happens to be configured.
+    vec2 uv = (floor(vUv * uSrcSize) + 0.5) / uSrcSize;
+    vec3 hdr = texture2D(tColor, uv).rgb * uExposure;
+    gl_FragColor = vec4(toSRGB(aces(hdr)), 1.0);
+  }
+`;
+
+// PIXEL BLIT + GODRAY — pixel-blit (nearest-snap UV + ACES + sRGB) AND a
+// screen-space god-ray pass in one shader. Godray march samples a full-res
+// depth prepass to find sky pixels (where shafts can pass), modulated into
+// distinct shafts perpendicular to the light direction. Same logic as the
+// realtime godrayFragment, applied AFTER the nearest-snap so the shafts
+// sample over the chunky pixels rather than blurring them.
+const PIXEL_BLIT_GODRAY_FRAG = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+
+  uniform sampler2D tColor;      // low-res PT HDR target
+  uniform sampler2D tDepth;      // depth prepass of standard-material scene
+  uniform vec2 uSrcSize;         // tColor size for nearest-snap quantisation
+  uniform float uExposure;
+  uniform vec2 uSunScreen;
+  uniform float uSunActive;
+  uniform vec3 uRayColor;
+  uniform float uStrength;
+  uniform float uDensity;
+  uniform float uDecay;
+
+  const int SAMPLES = 48;
+
+  vec3 aces(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+  }
+  vec3 toSRGB(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+  }
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+  void main() {
+    // crisp nearest UV — snap to source-texel centre, no bilinear blur
+    vec2 uvN = (floor(vUv * uSrcSize) + 0.5) / uSrcSize;
+    vec3 hdr = texture2D(tColor, uvN).rgb * uExposure;
+    vec3 col = aces(hdr);
+
+    if (uSunActive > 0.5) {
+      vec2 dir = (uSunScreen - vUv) * uDensity / float(SAMPLES);
+      float jitter = hash(vUv * 1024.0);
+      vec2 p = vUv + dir * jitter;
+      float accum = 0.0;
+      float w = 1.0;
+      float wsum = 0.0;
+      for (int i = 0; i < SAMPLES; i++) {
+        p += dir;
+        float d = texture2D(tDepth, clamp(p, 0.0, 1.0)).x;
+        float sky = step(0.999, d); // depth ~1 = no occluder → shaft passes
+        accum += sky * w;
+        wsum += w;
+        w *= uDecay;
+      }
+      accum /= max(wsum, 0.001);
+
+      vec2 toSun = normalize(uSunScreen - vUv + vec2(1e-4));
+      vec2 perp = vec2(-toSun.y, toSun.x);
+      float s = dot(vUv, perp);
+      float along = dot(vUv, toSun);
+      float bands =
+        0.5 + 0.5 * sin(s * 42.0 + along * 6.0)
+            * (0.55 + 0.45 * sin(s * 15.0 - along * 3.0));
+      bands = pow(clamp(bands, 0.0, 1.0), 1.4);
+      bands = mix(0.25, 1.0, bands);
+
+      float falloff = smoothstep(1.9, 0.05, distance(vUv, uSunScreen));
+      col += uRayColor * accum * bands * uStrength * falloff;
+    }
+
+    gl_FragColor = vec4(toSRGB(col), 1.0);
+  }
+`;
+
 // PHOTOREAL + GODRAY — same ACES+sRGB pipeline as PHOTOREAL_FRAG, plus a
 // screen-space god-ray pass that marches each pixel toward the projected sun
 // anchor and lights up wherever the ray crosses sky (i.e. depth==1). The
@@ -299,6 +403,37 @@ export class PixelArtPost {
       uniforms: { tColor: { value: null }, uExposure: { value: 1 } },
     });
 
+    this.pixelBlit = new THREE.ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: PIXEL_BLIT_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tColor: { value: null },
+        uSrcSize: { value: new THREE.Vector2(1, 1) },
+        uExposure: { value: 1 },
+      },
+    });
+
+    this.pixelBlitGodray = new THREE.ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: PIXEL_BLIT_GODRAY_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tColor: { value: null },
+        tDepth: { value: this.normalRT.depthTexture },
+        uSrcSize: { value: new THREE.Vector2(1, 1) },
+        uExposure: { value: 1 },
+        uSunScreen: { value: new THREE.Vector2(0.5, 0.5) },
+        uSunActive: { value: 0 },
+        uRayColor: { value: new THREE.Color(1.0, 0.92, 0.7) },
+        uStrength: { value: 2.0 },
+        uDensity: { value: 1.05 },
+        uDecay: { value: 0.99 },
+      },
+    });
+
     this.photorealGodray = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: PHOTOREAL_GODRAY_FRAG,
@@ -391,6 +526,40 @@ export class PixelArtPost {
     r.setClearColor(prevClear, prevAlpha);
   }
 
+  // Cel-style PT + god-rays: pixel-blit + screen-space shafts in one pass.
+  // Requires renderDepthPrepass(scene, cam) to have populated the depth attach
+  // beforehand this frame (we don't refresh it here — caller controls cadence
+  // so it can skip the prepass when the camera hasn't moved).
+  renderPixelBlitGodray(colorTex, srcW, srcH, opts = {}) {
+    const r = this.renderer;
+    const m = this.pixelBlitGodray;
+    m.uniforms.tColor.value = colorTex;
+    m.uniforms.uSrcSize.value.set(srcW, srcH);
+    m.uniforms.uExposure.value = opts.exposure ?? 1;
+    if (opts.sunScreen) m.uniforms.uSunScreen.value.copy(opts.sunScreen);
+    m.uniforms.uSunActive.value = opts.sunActive ? 1 : 0;
+    if (opts.strength !== undefined) m.uniforms.uStrength.value = opts.strength;
+    if (opts.rayColor) m.uniforms.uRayColor.value.copy(opts.rayColor);
+    this.quad.material = m;
+    r.setRenderTarget(null);
+    r.clear();
+    r.render(this.quadScene, this.quadCamera);
+  }
+
+  // Cel-style PT: nearest-blit a LOW-RES path-traced HDR target to the canvas.
+  // srcW/srcH = the path tracer's internal target size (not the canvas size).
+  renderPixelBlit(colorTex, srcW, srcH, exposure = 1) {
+    const r = this.renderer;
+    const m = this.pixelBlit;
+    m.uniforms.tColor.value = colorTex;
+    m.uniforms.uSrcSize.value.set(srcW, srcH);
+    m.uniforms.uExposure.value = exposure;
+    this.quad.material = m;
+    r.setRenderTarget(null);
+    r.clear();
+    r.render(this.quadScene, this.quadCamera);
+  }
+
   // Photoreal hero-shot path: blit the traced radiance straight to the canvas
   // at full resolution through ACES + sRGB only (no cel/outline/pixelation).
   renderPhotoreal(colorTex, exposure = 1) {
@@ -442,6 +611,8 @@ export class PixelArtPost {
     this.edge.dispose();
     this.comp.dispose();
     this.photoreal.dispose();
+    this.pixelBlit.dispose();
+    this.pixelBlitGodray.dispose();
     this.photorealGodray.dispose();
     this.quad.geometry.dispose();
   }
