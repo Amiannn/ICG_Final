@@ -50,6 +50,12 @@ export const realtimeMode = {
     dust.setTime(time);
     if (ctx.rainSplash) ctx.rainSplash.setTime(time); // animate rain-impact rings
 
+    // campfire fades in only at night, and is doused by rain
+    if (world.campfire) {
+      const nightF = settings.cycle ? (1 - lighting.dayness) : (settings.night ? 1 : 0);
+      world.campfire.update(time, nightF * (settings.rain ? 0 : 1));
+    }
+
     // ecosystem grows with the tree: in Growth/Morph modes ctx.growthReveal is
     // the growthProgress; in real-time it's null → full meadow.
     const reveal = ctx.growthReveal == null ? 1 : ctx.growthReveal;

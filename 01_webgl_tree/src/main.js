@@ -22,7 +22,7 @@ renderer.autoClear = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(palette.skyDay);
-scene.fog = new THREE.Fog(palette.fogDay, 22, 46);
+scene.fog = new THREE.Fog(palette.fogDay, 32, 72);
 
 const pixel = new PixelCamera();
 const lighting = new Lighting(scene);
@@ -66,6 +66,36 @@ window.__tod = (t) => {
 
 window.addEventListener("resize", resize);
 resize();
+
+// Horizontal mouse-drag yaw. Click + drag left/right on the canvas to orbit
+// the camera around the cedar; vertical motion is intentionally ignored.
+canvas.style.cursor = "grab";
+let dragging = false;
+let lastX = 0;
+const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
+canvas.addEventListener("pointerdown", (e) => {
+  dragging = true;
+  lastX = e.clientX;
+  canvas.setPointerCapture(e.pointerId);
+  canvas.style.cursor = "grabbing";
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  lastX = e.clientX;
+  pixel.setYaw(pixel.yaw - dx * YAW_SENSITIVITY);
+});
+const endDrag = (e) => {
+  if (!dragging) return;
+  dragging = false;
+  if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
+    canvas.releasePointerCapture(e.pointerId);
+  }
+  canvas.style.cursor = "grab";
+};
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("pointerleave", endDrag);
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(render);
@@ -121,7 +151,8 @@ function applyDynamicSettings() {
   pipeline.outline.uniforms.uStrength.value = settings.outlineStrength;
   // no sun shafts in the rain (overcast)
   pipeline.godray.uniforms.uEnabled.value = settings.godrays && !settings.rain ? 1 : 0;
-  dust.points.visible = settings.dust;
+  // rain mutes the dust automatically — motes would read as static in a downpour
+  dust.points.visible = settings.dust && !settings.rain;
   // rain impact: pond ripples + splash rings on the ground
   world.water.material.uniforms.uRain.value = settings.rain ? 1 : 0;
   rainSplash.setRain(settings.rain);

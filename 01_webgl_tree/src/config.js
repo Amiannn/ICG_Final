@@ -13,7 +13,7 @@ export const settings = {
   night: false,
   cycle: true, // continuous day–night cycle (overrides the Night toggle while on)
   grain: true,
-  verticalResolution: 300,
+  verticalResolution: 420,
   outlineStrength: 0.0,
 };
 

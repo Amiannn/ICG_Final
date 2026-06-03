@@ -17,10 +17,14 @@ export class PixelCamera {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
     this.viewHeight = 24.5; // world units visible vertically (fits the big cedar)
     this.target = new THREE.Vector3(1.8, 8.2, 1.0);
-    // Fixed iso offset from target to eye. Drift moves the target and keeps this
-    // constant, so the *orientation* never changes -- texel-snapping can only
-    // smooth translation, not rotation, so an orbiting camera always swims.
-    this.eyeOffset = new THREE.Vector3(13, 10, 13);
+    // Iso offset from target to eye. baseEyeOffset is the fixed-Y rig; eyeOffset
+    // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
+    // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
+    // while dragging — it settles once the yaw stops changing.
+    this.baseEyeOffset = new THREE.Vector3(13, 10, 13);
+    this.eyeOffset = this.baseEyeOffset.clone();
+    this.yaw = 0;
+    this._yAxis = new THREE.Vector3(0, 1, 0);
     this.desiredTarget = this.target.clone();
     this.desiredPosition = this.target.clone().add(this.eyeOffset);
 
@@ -59,6 +63,12 @@ export class PixelCamera {
       8.2,
       1.0 + Math.cos(time * 0.12) * 1.2,
     );
+    this.desiredPosition.copy(this.desiredTarget).add(this.eyeOffset);
+  }
+
+  setYaw(yaw) {
+    this.yaw = yaw;
+    this.eyeOffset.copy(this.baseEyeOffset).applyAxisAngle(this._yAxis, yaw);
     this.desiredPosition.copy(this.desiredTarget).add(this.eyeOffset);
   }
 

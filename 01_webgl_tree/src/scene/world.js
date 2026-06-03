@@ -5,6 +5,7 @@ import { makeGrass } from "./grass.js";
 import { Water } from "./water.js";
 import { makeAnimals } from "./animals.js";
 import { makeBirds } from "../effects/birds.js";
+import { makeCampfire } from "./campfire.js";
 
 // Builds the whole diorama and returns handles the main loop needs.
 export function buildWorld(scene) {
@@ -113,6 +114,13 @@ export function buildWorld(scene) {
   const birds = makeBirds();
   scene.add(birds.group);
 
+  // small campfire just south of the pond's near shore — flame only lights up
+  // at night. Positioned to clear the rocks at (5.6, …, 0.6) and (6.8, …, -2.6)
+  // and stay outside the tree-base exclusion.
+  const campfire = makeCampfire();
+  campfire.group.position.set(6.9, 0, -0.5);
+  scene.add(campfire.group);
+
   // Ecosystem grows with the tree: reveal grass blades (by instance count) and
   // bloom in the flowers as growthProgress (frac) rises. frac=1 = full meadow.
   function setGroundReveal(frac) {
@@ -125,7 +133,7 @@ export function buildWorld(scene) {
     }
   }
 
-  return { water, tree, grass, ground, animals, birds, flowers, setGroundReveal };
+  return { water, tree, grass, ground, animals, birds, flowers, campfire, setGroundReveal };
 }
 
 const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };

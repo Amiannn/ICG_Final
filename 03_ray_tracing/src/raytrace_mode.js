@@ -407,12 +407,42 @@ export const raytraceMode = {
       if (_state.pathTracer.samples < MAX_SPP) {
         _state.pathTracer.renderSample();
       }
-      // Path Trace is photoreal-only now: ACES-tonemapped radiance at full
-      // resolution (no cel/outline/pixelation). Exposure < 1 keeps the lit
-      // foliage in the saturated midtones instead of ACES's pale shoulder.
-      _state.post.renderPhotoreal(_state.pathTracer.target.texture, 0.6);
+
+      // God-ray pass: refresh the depth prepass when the camera moved (or on
+      // the first frame), then ACES + sRGB + screen-space shafts into canvas.
+      // Depth prepass at half-canvas resolution — plenty for screen-space rays
+      // and cheap enough to refresh on settle.
+      const cw = ctx.renderer.domElement.clientWidth;
+      const ch = ctx.renderer.domElement.clientHeight;
+      const dw = Math.max(64, Math.floor(cw * 0.5));
+      const dh = Math.max(64, Math.floor(ch * 0.5));
+      _state.post.setSize(dw, dh);
+      if (moved || !_state.depthReady) {
+        _state.post.renderDepthPrepass(ctx.scene, _state.perspCam);
+        _state.depthReady = true;
+      }
+      const sun = this._projectSun(ctx);
+      _state.post.renderPhotorealGodray(_state.pathTracer.target.texture, {
+        exposure: 0.6,
+        sunScreen: sun.uv,
+        sunActive: sun.active,
+        strength: 1.8,
+      });
     }
     this._updateHud();
+  },
+
+  _projectSun(ctx) {
+    const sunWorld = ctx.lighting.sun.position;
+    const cam = _state.perspCam;
+    // View-space z < 0 = in front of the camera (three.js cameras look down -z).
+    // project()'s perspective divide flips signs when behind, giving nonsense
+    // UVs, so gate the shaft pass on the explicit in-front check.
+    const viewPos = sunWorld.clone().applyMatrix4(cam.matrixWorldInverse);
+    const active = viewPos.z < -0.1;
+    const ndc = sunWorld.clone().project(cam);
+    const uv = new THREE.Vector2((ndc.x + 1) * 0.5, (ndc.y + 1) * 0.5);
+    return { uv, active };
   },
 
   dispose(ctx) {
@@ -540,12 +570,23 @@ export const raytraceMode = {
       dirty = true;
     }
     // Keep focus locked on the tree (target) for the depth-of-field blur.
+    // Tolerance is wide because PT mode's drag-yaw rotates eyeOffset around Y
+    // — yaw doesn't change |eyeOffset|, so focus is effectively invariant; only
+    // a real reframing (resize, mode-switch) should trip this and reset samples.
     const focus = eyePos.distanceTo(target);
-    if (persp.focusDistance !== undefined && Math.abs(persp.focusDistance - focus) > 0.05) {
+    if (persp.focusDistance !== undefined && Math.abs(persp.focusDistance - focus) > 1.0) {
       persp.focusDistance = focus;
       dirty = true;
     }
-    if (!_state.lastEyeWorld.equals(eyePos) || !_state.lastTargetWorld.equals(target)) {
+    // Tolerance on equality so sub-unit camera nudges (a continuous yaw-drag
+    // arc, a tiny drift wobble) don't restart accumulation every frame — PT
+    // only resets when the camera has actually moved meaningfully. The tracer's
+    // displayed image always lags behind perspCam anyway (we only blit
+    // target.texture), so it's coherent to leave perspCam parked too.
+    const CAMERA_EPS_SQ = 0.04 * 0.04; // world units
+    const eyeMoved = _state.lastEyeWorld.distanceToSquared(eyePos) > CAMERA_EPS_SQ;
+    const tgtMoved = _state.lastTargetWorld.distanceToSquared(target) > CAMERA_EPS_SQ;
+    if (eyeMoved || tgtMoved) {
       persp.position.copy(eyePos);
       persp.lookAt(target);
       persp.updateMatrixWorld();
