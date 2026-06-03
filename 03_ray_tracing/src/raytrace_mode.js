@@ -119,7 +119,7 @@ export const raytraceMode = {
       // leaf-clumps (see buildFoliageClumps). Replaces the flat crossed cards,
       // which read as ugly cardboard under the path tracer — the 3D blobs have
       // real form, self-shadowing and GI colour bleed (a clean low-poly conifer).
-      const leaves = buildFoliageClumps(obj, { sizeScale: 1.25, clumpsPerInst: 4, detail: 1 });
+      const leaves = buildFoliageClumps(obj, { sizeScale: 1.2, clumpsPerInst: 12 });
       obj.parent.add(leaves);
       _state.merged.push({ mesh: leaves, parent: obj.parent });
     }

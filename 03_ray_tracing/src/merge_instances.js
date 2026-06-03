@@ -285,29 +285,27 @@ export function mergeBillboardsToMesh(
 }
 
 // Build REAL 3D foliage geometry from a billboard InstancedMesh: each sprig
-// anchor becomes a couple of small icosahedron "leaf clumps", merged into one
-// static Mesh. Flat crossed cards read as ugly cardboard under the path tracer;
-// little 3D blobs have real form, self-shadowing and GI colour bleed — a clean
-// low-poly conifer. Per-instance tint (the dark-base→warm-crown gradient from
-// tree.js) is baked into vertex colours; the layered skirt anchor distribution
-// keeps the conifer silhouette.
-export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 2, detail = 1 } = {}) {
-  const base = new THREE.IcosahedronGeometry(1, detail);
+// anchor sprouts a spray of thin NEEDLE spikes (elongated faceted icosahedra)
+// pointing outward from the trunk and drooping down, merged into one static
+// Mesh. Flat cards read as ugly cardboard under the path tracer; a needle spray
+// reads as a real conifer — fine, with volume, self-shadowing and GI colour
+// bleed. A dark-base→warm-crown green gradient (by height) is baked into the
+// vertex colours; the layered skirt anchor distribution keeps the conifer form.
+export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 10 } = {}) {
+  // detail 0 = 20-face faceted spindle; cheap and crisp once elongated.
+  const base = new THREE.IcosahedronGeometry(1, 0);
   const bp = base.attributes.position.array;
-  const bn = base.attributes.normal.array;
   const vertsPerClump = base.attributes.position.count;
   const count = inst.count;
   const total = count * clumpsPerInst * vertsPerClump;
   const positions = new Float32Array(total * 3);
-  const normals = new Float32Array(total * 3);
   // RGBA (itemSize 4): three-gpu-pathtracer's scene merge builds the colour
   // attribute as 4-component, so a 3-component one mismatches and whites out.
   const colors = new Float32Array(total * 4);
 
   // Canopy vertical extent → a controlled dark-base → warm-crown green gradient
-  // (more reliable than re-using the instance colours, whose colour-space
-  // handling washed the lower skirts pale). Palette written straight to the
-  // colour attribute as moderate-albedo greens so the key doesn't blow them out.
+  // (more reliable than the instance colours, whose colour-space handling washed
+  // the lower skirts pale). Moderate-albedo greens so the key doesn't blow them out.
   let minY = Infinity;
   let maxY = -Infinity;
   for (let i = 0; i < count; i++) {
@@ -319,8 +317,8 @@ export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 2, d
     }
   }
   const ySpan = Math.max(1e-3, maxY - minY);
-  const GBASE = [0.15, 0.28, 0.11];
-  const GMID = [0.28, 0.43, 0.15];
+  const GBASE = [0.13, 0.26, 0.09];
+  const GMID = [0.26, 0.42, 0.14];
   const GTOP = [0.55, 0.60, 0.28];
 
   let vi = 0;
@@ -335,28 +333,80 @@ export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 2, d
       continue;
     }
 
-    const baseR = sx * 0.34 * sizeScale;
+    const baseR = sx * 0.3 * sizeScale;
+    const rl = Math.hypot(_pos.x, _pos.z) || 1e-3;
+    const rxBase = _pos.x / rl;
+    const rzBase = _pos.z / rl;
+
     for (let k = 0; k < clumpsPerInst; k++) {
       const seed = i * 19.13 + k * 7.7;
-      const cx = _pos.x + (_hash(seed + 0.1) - 0.5) * sx * 0.85 * sizeScale;
-      const cy = _pos.y + (_hash(seed + 0.2) - 0.5) * sy * 0.7 * sizeScale;
-      const cz = _pos.z + (_hash(seed + 0.3) - 0.5) * sx * 0.85 * sizeScale;
-      const r = baseR * (0.6 + 0.5 * _hash(seed + 0.4)); // smaller, denser blobs read as foliage not grapes
-      const t = (cy - minY) / ySpan;
-      const t1 = Math.min(1, Math.max(0, t * 1.25));
-      const t2 = Math.min(1, Math.max(0, (t - 0.55) * 1.8));
-      const lj = (_hash(seed + 0.5) - 0.5) * 0.06;
+      const ha = _hash(seed + 0.11);
+      const hb = _hash(seed + 0.22);
+      const hc = _hash(seed + 0.33);
+      const hd = _hash(seed + 0.44);
+      const he = _hash(seed + 0.55);
+      const hf = _hash(seed + 0.66);
+      const hg = _hash(seed + 0.77);
+      const hh = _hash(seed + 0.88);
+      const hj = _hash(seed + 0.99);
+
+      // needle direction: outward (radial) + droop down + lateral jitter
+      let rx = rxBase;
+      let rz = rzBase;
+      if (rl < 1e-3) {
+        const a = ha * 6.2832;
+        rx = Math.cos(a);
+        rz = Math.sin(a);
+      }
+      let dnx = rx * (0.55 + 0.45 * ha) + (hb - 0.5) * 0.7;
+      let dny = -0.15 - 0.6 * hc;
+      let dnz = rz * (0.55 + 0.45 * ha) + (hd - 0.5) * 0.7;
+      const dl = Math.hypot(dnx, dny, dnz) || 1;
+      dnx /= dl;
+      dny /= dl;
+      dnz /= dl;
+
+      // orthonormal basis (t, u) perpendicular to the needle axis d
+      let upx = 0;
+      let upy = 1;
+      let upz = 0;
+      if (Math.abs(dny) > 0.9) {
+        upx = 1;
+        upy = 0;
+      }
+      let tx = upy * dnz - upz * dny;
+      let ty = upz * dnx - upx * dnz;
+      let tz = upx * dny - upy * dnx;
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      tx /= tl;
+      ty /= tl;
+      tz /= tl;
+      const uxb = dny * tz - dnz * ty;
+      const uyb = dnz * tx - dnx * tz;
+      const uzb = dnx * ty - dny * tx;
+
+      const L = baseR * (1.4 + 0.9 * he); // needle length
+      const w = baseR * (0.16 + 0.12 * hf); // needle half-width
+      const cx = _pos.x + (hg - 0.5) * sx * 0.6 * sizeScale + dnx * L * 0.45;
+      const cy = _pos.y + (hh - 0.5) * sy * 0.5 * sizeScale + dny * L * 0.45;
+      const cz = _pos.z + (hj - 0.5) * sx * 0.6 * sizeScale + dnz * L * 0.45;
+
+      const tcol = (cy - minY) / ySpan;
+      const t1 = Math.min(1, Math.max(0, tcol * 1.25));
+      const t2 = Math.min(1, Math.max(0, (tcol - 0.55) * 1.8));
+      const lj = (he - 0.5) * 0.06;
       const cr = GBASE[0] + (GMID[0] - GBASE[0]) * t1 + (GTOP[0] - GMID[0]) * t2 + lj;
       const cg = GBASE[1] + (GMID[1] - GBASE[1]) * t1 + (GTOP[1] - GMID[1]) * t2 + lj;
       const cb = GBASE[2] + (GMID[2] - GBASE[2]) * t1 + (GTOP[2] - GMID[2]) * t2 + lj;
+
       for (let v = 0; v < vertsPerClump; v++) {
+        const vbx = bp[v * 3] * w;
+        const vby = bp[v * 3 + 1] * L; // elongate along local Y -> needle axis
+        const vbz = bp[v * 3 + 2] * w;
         const o = vi * 3;
-        positions[o] = cx + bp[v * 3] * r;
-        positions[o + 1] = cy + bp[v * 3 + 1] * r;
-        positions[o + 2] = cz + bp[v * 3 + 2] * r;
-        normals[o] = bn[v * 3];
-        normals[o + 1] = bn[v * 3 + 1];
-        normals[o + 2] = bn[v * 3 + 2];
+        positions[o] = cx + vbx * tx + vby * dnx + vbz * uxb;
+        positions[o + 1] = cy + vbx * ty + vby * dny + vbz * uyb;
+        positions[o + 2] = cz + vbx * tz + vby * dnz + vbz * uzb;
         const co = vi * 4;
         colors[co] = cr;
         colors[co + 1] = cg;
@@ -374,8 +424,8 @@ export function buildFoliageClumps(inst, { sizeScale = 1.0, clumpsPerInst = 2, d
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions.subarray(0, vi * 3), 3));
-  geo.setAttribute("normal", new THREE.BufferAttribute(normals.subarray(0, vi * 3), 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors.subarray(0, vi * 4), 4));
+  geo.computeVertexNormals(); // flat per-face normals -> crisp little needles
 
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,

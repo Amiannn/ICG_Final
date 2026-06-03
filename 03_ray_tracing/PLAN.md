@@ -453,9 +453,10 @@ v0.0.24 對本場景有三個硬限制，**必須先解，否則跑不起來**�
 ### 10.4 第二輪(2026-06-03,使用者:樹別用卡片、別太糊、PT 走純寫實)
 - **PT 改 photoreal-only**:移除 pixel-art post 分支 + `◻ Photoreal` 切換鈕;`render()` 永遠
   `renderPhotoreal()`。cel/outline 像素風只留在 `01` 即時視圖。
-- **樹冠改真 3D 幾何**:`merge_instances.buildFoliageClumps()` — 每個 sprig anchor 生 4 顆小
-  icosahedron clump(uniform scale 保住法線)、green-by-height 漸層(dark base→warm crown)。
-  取代醜的 billboard 卡片;3D blob 有體積/自陰影/GI,不再是紙板。
+- **樹冠改真 3D 幾何**:`merge_instances.buildFoliageClumps()` — 每個 sprig anchor 噴出
+  ~12 根細 **needle 針葉 spike**(拉長的 faceted icosa,朝外+下垂、flat-shaded),
+  green-by-height 漸層(dark base→warm crown)。取代醜的 billboard 卡片,讀起來像真針葉樹。
+  (先試過圓 icosa clump → 像花椰菜;改細長 needle spray 才像針葉。)
 - **坑(重要)**:three-gpu-pathtracer 場景 merge 的 color attribute 是 **itemSize 4 (RGBA)**;
   clump 若用 itemSize 3 會 mismatch → 葉子洗成白色。必須寫 RGBA(alpha=1)。
 - **DoF 調弱**:`fStop 0.008→0.03`(使用者嫌太糊,改成只有遠近輕微分離)。
