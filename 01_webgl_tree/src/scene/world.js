@@ -18,8 +18,11 @@ export function buildWorld(scene) {
     flowerWhite: toonMaterial(0xf2ead2),
   };
 
-  // ground (large plane; the far edge dissolves into fog so no disc rim shows)
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), mats.grass);
+  // ground — huge so PT mode (which ignores scene.fog) never sees the edge.
+  // Realtime fog (~72 units) hides everything past 72 anyway, so the extra
+  // 500×500 expanse costs realtime nothing and gives PT an effectively
+  // infinite meadow extending out under the horizon.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), mats.grass);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
@@ -36,6 +39,32 @@ export function buildWorld(scene) {
     hill.position.set(x, h * 0.3, z);
     hill.scale.set(w, h, d);
     hill.rotation.set(0.1, x * 0.2, -0.08);
+    hill.castShadow = true;
+    hill.receiveShadow = true;
+    scene.add(hill);
+  }
+
+  // Far horizon ring — large dodecahedrons placed at radius ~28-46 units
+  // around the scene to fill the mid-distance in PT mode (which ignores fog)
+  // and read as the "the world continues into hills" silhouette the
+  // reference image has. In realtime they sit past the fog far plane (72),
+  // so they only stop fading at the closer ones and don't change the look.
+  const farHills = [
+    [-32, -18, 9, 2.6, 3.2],
+    [-12, -28, 8, 2.2, 3.0],
+    [18, -32, 10, 2.4, 3.4],
+    [38, -10, 9, 2.5, 3.0],
+    [42, 18, 8, 2.0, 2.8],
+    [22, 36, 9, 2.3, 3.1],
+    [-18, 42, 10, 2.6, 3.2],
+    [-38, 24, 8.5, 2.1, 2.9],
+    [-44, -6, 9, 2.4, 3.0],
+  ];
+  for (const [x, z, w, h, d] of farHills) {
+    const hill = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mats.hill);
+    hill.position.set(x, h * 0.3, z);
+    hill.scale.set(w, h, d);
+    hill.rotation.set(0.12, x * 0.13, -0.05);
     hill.castShadow = true;
     hill.receiveShadow = true;
     scene.add(hill);
