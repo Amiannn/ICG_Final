@@ -1,18 +1,41 @@
 # Pixel Bonsai
 
-A 3D pixel-art bonsai scene rendered in real time with Three.js. A large layered
-cedar sits in a hand-styled meadow with a reflective pond — now with a full
-**day–night cycle**, **weather** (rain that ripples the pond and splashes the
-ground), **wind** that sways the grass and foliage, **wildlife** that wanders in,
-a **developmental tree-growth** animation, and a **photoreal path-tracing** mode —
-all rendered through a low-resolution, cel-shaded, outline pipeline for a clean
-pixel-art look.
+A little **3D pixel-art tree-growing game**, rendered in real time with Three.js.
+You raise a tree from a Day-1 sprout into a towering cedar over 30 days — watering
+and fertilising it, watching the sun arc through a full **day–night cycle**, and
+weathering the **rain** (which ripples the pond and splashes the ground). It plays
+in a phone-shaped portrait UI, and the whole scene is drawn through a low-resolution,
+cel-shaded, outlined pipeline for a clean pixel-art look.
+
+Under the hood it's also a small graphics showcase: the same scene can be viewed in
+several **technical modes** — staged tree growth, textbook morph-target morphing, and
+a photoreal **GPU path tracer** — all reachable from the in-game Settings panel.
 
 The rendering style is inspired by David Holland's write-up on 3D pixel art
 rendering (<https://www.davidhol.land/articles/3d-pixel-art-rendering/>); every
 technique here is an independent Three.js implementation.
 
 ![Pixel Bonsai — day](docs/screenshots/day.png)
+
+## The game
+
+The default experience is a self-running little garden in a phone-portrait HUD:
+
+- **Grow a tree, day by day.** A day counter advances on its own; the tree
+  continuously morphs from a sprout (Day 1) to its full form (Day 30), and the
+  meadow's wildlife wanders in as it matures.
+- **Tend it.** Tap **Water**, **Fertilize**, or **Bone Meal** on the bottom sheet.
+  Water brings a passing shower; fertiliser and bone meal give a growth spurt.
+- **Time of day.** A day/night slider lets you scrub from sunrise → noon → sunset →
+  night; left alone, the sun cycles on its own and the lighting grades smoothly.
+- **Weather.** Showers roll in at random (and on Water) — rain streaks, **pond
+  ripples**, **ground splash rings**, and procedural rain ambience.
+- **Pick a tree.** Settings → *Tree* switches species: a procedurally-grown
+  **billboard cedar** or a **morph-target** sprout→cone tree.
+- **Journal.** The book button logs events (rain, a deer visiting, your actions).
+
+The slider/sheet collapse with the grabber to reveal the full scene; the gear opens
+**Settings** (graphics options, resolution, tree species, and the technical modes).
 
 ## Demo
 
@@ -24,17 +47,32 @@ technique here is an independent Three.js implementation.
 | --- | --- |
 | ![wildlife](docs/screenshots/demo_wildlife.png) | ![path trace](docs/screenshots/compare_pt_photoreal.png) |
 
-**Tree growth** — bare twigs → leaves fill in (sparse → dense) → the full cedar:
+**Tree growth** — sprout → leaves fill in (sparse → dense) → the full cedar:
 
 | ① twigs + first buds | ② crown fills in | ③ full cedar |
 | --- | --- | --- |
 | ![growth 1](docs/screenshots/demo_growth_1.png) | ![growth 2](docs/screenshots/demo_growth_2.png) | ![growth 3](docs/screenshots/demo_growth_3.png) |
 
+## Quick start
+
+```bash
+cd 01_webgl_tree
+npm install
+npm run dev        # open http://localhost:5173 (already runs with --host for your LAN)
+```
+
+Open the LAN URL on a phone for the full-screen portrait experience. Build a static
+bundle with `npm run build` (output in `01_webgl_tree/dist/`). Path Trace needs
+WebGL2; it accumulates samples over time and converges fastest on a real GPU.
+
 ## Modes
 
-Switch modes from the top of the on-screen panel:
+The game is the default mode. Open **Settings → Mode** to switch (or deep-link with
+`?mode=realtime` / `growth` / `growthmorph` / `raytrace`):
 
-- **Real-time** — the full living scene: day–night cycle, weather, wind, wildlife.
+- **Game** — the tree-raising game described above (real-time pipeline + game clock).
+- **Real-time** — the full living scene with no game layer: day–night cycle, weather,
+  wind, wildlife.
 - **Growth** — the cedar develops from a twig sprout into the full tree (a looping,
   parametric developmental morph). Grass, flowers, animals and birds fill in as it grows.
 - **Morph** — a textbook morph-target version of the growth (every vertex is
@@ -43,68 +81,56 @@ Switch modes from the top of the on-screen panel:
   sky+sun environment, real 3D foliage, detail-textured ground/bark, a near-mirror
   rippled lake, and a pixel-art post pass.
 
-## Quick start
-
-```bash
-cd 01_webgl_tree
-npm install
-npm run dev        # open http://localhost:5173 (use --host to expose on your LAN)
-```
-
-Build a static bundle with `npm run build` (output in `01_webgl_tree/dist/`).
-Path Trace needs WebGL2; it accumulates samples over time and converges fastest
-on a real GPU.
-
 ## What's in the renderer
 
-The whole scene is drawn into a small render target (default 300px tall) and
+The whole scene is drawn into a small render target (default 540px tall) and
 upscaled with nearest-neighbour sampling, so everything reads as crisp pixels.
 
 **Pixel-art pipeline**
 - **Low-res pipeline** — color + depth + view-normal targets, post passes, then a
   nearest upscale to the canvas.
 - **Pixel-perfect camera** — snaps to a view-aligned texel grid; the final image
-  is shifted back by the sub-pixel snap error, so panning stays smooth.
+  is shifted back by the sub-pixel snap error, so panning stays smooth. Drag
+  horizontally to orbit (yaw) around the tree.
 - **Cel shading + cloud shadows** — toon gradient ramp; a scrolling noise texture
   is injected into every material as soft cloud shadows.
 - **Outlines** — depth/normal edge detection for single-pixel outlines.
 - **Planar-reflection water**, **volumetric god rays**, **dust motes**, plus 2D
   film grain and vignette.
 
-**Atmosphere & life** (this integration)
+**Atmosphere & life**
 - **Day–night cycle** — a keyframed sky/fog/sun gradient with an arcing sun (so
   shadows rotate). Deep night stays a visible *moonlit blue* rather than black,
-  and the god rays fade out at night and in rain.
+  and the god rays fade out at night and in rain. In Game mode the cycle is driven
+  by the game clock / time slider.
 - **Weather** — rain as gentle, sparse, wind-slanted streaks with an overcast
   grade and procedural rain ambience. Raindrops **ripple the pond** (perturbing
   the reflection) and pop **splash rings** across the ground and water.
 - **Wind** — a shared uniform sways the grass and foliage billboards across the
   whole scene (gustier while it rains).
-- **Wildlife** — low-poly cows, sheep and a dog walk *in from off-screen* (eased,
-  facing their direction of travel, legs trotting) and a small flock of birds
-  glides in. They only appear in clear daylight and head back out at night / in
-  rain. Grass, flowers, animals and birds all fill in with the tree's growth.
+- **Wildlife** — low-poly cows, sheep and a dog walk *in from off-screen* and a
+  small flock of birds glides in. They appear in clear daylight and head back out
+  at night / in rain, and stagger in with the tree's growth.
+
+**Game layer** ([`01_webgl_tree/src/modes/game.js`](01_webgl_tree/src/modes/game.js))
+- A clock advances the day counter and feeds a continuous growth value to the chosen
+  tree; the time-of-day, random weather and Water/Fertilize/Bone Meal actions all
+  hook into the existing lighting, rain and growth systems.
 
 **Tree growth** ([`02_tree_growth`](02_tree_growth/))
-- A parametric developmental morph of the *same* cedar: it first puts out a spray
-  of bare twigs, then leaves bud and fill the crown as a smooth coherent wave
-  (sparse → dense) while the crown opens out, ending exactly as the scene's tree.
+- **Parametric developmental morph** of the *same* cedar: bare twigs first, then
+  leaves bud and fill the crown as a smooth wave while it opens out — ending exactly
+  as the scene's tree. Reused by the Game's "cedar" species via
+  [`cedar_growth.js`](02_tree_growth/src/cedar_growth.js).
+- **Morph-target tree** ([`morph_tree.js`](02_tree_growth/src/morph_tree.js)) — a
+  dedicated sprout↔mature mesh whose every vertex is linearly interpolated (the
+  "morph" species / Morph mode).
 
 **Path tracing** ([`03_ray_tracing`](03_ray_tracing/))
 - A photoreal GPU path tracer (three-gpu-pathtracer + three-mesh-bvh): HDR sky+sun
   environment, depth-of-field hero framing, real 3D foliage clumps (not flat
   cards), detail textures (grass/bark/water normals), and a rippled near-mirror
   lake, finished with a pixel-art post chain.
-
-## Controls
-
-The on-screen panel toggles every effect and lets you change the vertical
-resolution and outline strength live:
-
-`Camera drift` · `Texel snap` · `Outlines` · `Cloud shadows` · `Water reflect`
-· `God rays` · `Dust motes` · `Rain` · `Day cycle` · `Night` · `Film grain`
-
-(`Day cycle` runs the automatic sun arc; turn it off to use the static `Night` toggle.)
 
 ## Project structure
 
@@ -116,8 +142,8 @@ see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ```text
 ICG_Final/
 ├── 01_webgl_tree/    # real-time WebGL Pixel Bonsai (Three.js + Vite) — the base
-│                     #   + day-night, weather, wind, wildlife
-├── 02_tree_growth/   # growth morphing: twig sprout -> full cedar
+│                     #   + the mobile game UI, day-night, weather, wind, wildlife
+├── 02_tree_growth/   # growth morphing: twig sprout -> full cedar (+ morph-target tree)
 ├── 03_ray_tracing/   # photoreal path-traced showcase of the same tree
 └── docs/             # screenshots and notes
 ```
