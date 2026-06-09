@@ -5,13 +5,15 @@ import { Lighting } from "./lighting.js";
 import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
+import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
+import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
 import { growthMorphMode } from "../../02_tree_growth/src/growth_morph.js";
-import { raytraceMode } from "../../03_ray_tracing/src/raytrace_mode.js";
+// Ray tracing has been retired to ../../legacy/03_ray_tracing for this version.
 
 const canvas = document.querySelector("#scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
@@ -31,8 +33,19 @@ const dust = new DustParticles();
 scene.add(dust.points);
 const pipeline = new Pipeline(renderer, pixel);
 const rainSound = makeRainSound();
+const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
+
+// Audio can only start after a user gesture (browser autoplay policy), so kick
+// the ambient music off on the first interaction if it's enabled.
+function startAudioOnce() {
+  if (settings.music) music.set(true);
+  window.removeEventListener("pointerdown", startAudioOnce);
+  window.removeEventListener("keydown", startAudioOnce);
+}
+window.addEventListener("pointerdown", startAudioOnce);
+window.addEventListener("keydown", startAudioOnce);
 
 // Shared context passed to every mode plugin (see CONTRIBUTING.md §5).
 const ctx = {
@@ -46,16 +59,34 @@ const ctx = {
   world,
   dust,
   rainSplash,
+  rainSound,
   pipeline,
   settings,
+  tod: null, // game mode drives this; null = use each mode's own time-of-day
 };
 
-const modes = { realtime: realtimeMode, growth: growthMode, growthmorph: growthMorphMode, raytrace: raytraceMode };
-let currentMode = realtimeMode;
+// One place to switch rain on/off with all its effects (lighting overcast,
+// ambience, pond ripples, ground splash, screen streaks). Game weather + the
+// Rain toggle both go through here.
+ctx.setRain = (on) => {
+  settings.rain = on;
+  lighting.setRain(on);
+  rainSound.set(on);
+  applyDynamicSettings();
+};
+
+const modes = { game: gameMode, realtime: realtimeMode, growth: growthMode, growthmorph: growthMorphMode };
+let currentMode = gameMode;
 currentMode.init(ctx);
 
-initUI(onSettingChange, switchMode);
+initUI(onSettingChange, onAction, switchMode, onSpecies);
 applyAllSettings();
+
+// Dev hook: `?mode=growthmorph` (or realtime/growth) jumps straight into that
+// mode on load — handy for headless-screenshot scripts and quick deep links.
+const _qMode = new URLSearchParams(location.search).get("mode");
+if (_qMode && modes[_qMode] && modes[_qMode] !== currentMode) switchMode(_qMode);
+window.__mode = switchMode;
 
 // debug/scrub hook: freeze the cycle and set a specific time-of-day (0..1)
 window.__tod = (t) => {
@@ -65,6 +96,8 @@ window.__tod = (t) => {
 };
 
 window.addEventListener("resize", resize);
+// also re-fit whenever the canvas box itself changes (mobile URL bar, CSS, …)
+new ResizeObserver(resize).observe(canvas);
 resize();
 
 // Horizontal mouse-drag yaw. Click + drag left/right on the canvas to orbit
@@ -116,9 +149,10 @@ function switchMode(name) {
 }
 
 function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h, true);
+  // size to the phone stage (the canvas box), not the whole window
+  const w = canvas.clientWidth || window.innerWidth;
+  const h = canvas.clientHeight || window.innerHeight;
+  renderer.setSize(w, h, false);
 
   const aspect = w / h;
   const displayH = settings.verticalResolution;
@@ -135,15 +169,30 @@ function resize() {
 function onSettingChange(key) {
   if (key === "verticalResolution") {
     resize();
+  } else if (key === "timeOfDay") {
+    if (currentMode.scrubTime) currentMode.scrubTime(settings.timeOfDay); // game slider
+  } else if (key === "music") {
+    music.set(settings.music);
+    return;
   } else if (key === "night") {
     if (!settings.cycle) lighting.setNight(settings.night); // cycle overrides the static toggle
   } else if (key === "rain") {
-    lighting.setRain(settings.rain); // rain ⇒ overcast (no sun)
-    rainSound.set(settings.rain);    // procedural rain ambience on/off
+    ctx.setRain(settings.rain);
+    return; // setRain already calls applyDynamicSettings
   } else if (key === "cycle") {
     if (!settings.cycle) lighting.setNight(settings.night); // turning the cycle off restores static day/night
   }
   applyDynamicSettings();
+}
+
+// Water / Fertilize / Bone Meal taps from the HUD → the active mode.
+function onAction(name) {
+  if (currentMode.action) currentMode.action(name);
+}
+
+// Tree species picked in Settings → the active mode (game).
+function onSpecies(name) {
+  if (currentMode.setSpecies) currentMode.setSpecies(name);
 }
 
 function applyDynamicSettings() {

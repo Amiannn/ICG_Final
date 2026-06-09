@@ -15,13 +15,13 @@ import * as THREE from "three";
 export class PixelCamera {
   constructor() {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
-    this.viewHeight = 24.5; // world units visible vertically (fits the big cedar)
+    this.viewHeight = 30; // world units visible vertically (pulled back, but the ground still fills the lower frame)
     this.target = new THREE.Vector3(1.8, 8.2, 1.0);
     // Iso offset from target to eye. baseEyeOffset is the fixed-Y rig; eyeOffset
     // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
     // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
     // while dragging — it settles once the yaw stops changing.
-    this.baseEyeOffset = new THREE.Vector3(13, 10, 13);
+    this.baseEyeOffset = new THREE.Vector3(13, 5.5, 13); // low-ish eye, angled enough that the ground fills the lower frame
     this.eyeOffset = this.baseEyeOffset.clone();
     this.yaw = 0;
     this._yAxis = new THREE.Vector3(0, 1, 0);

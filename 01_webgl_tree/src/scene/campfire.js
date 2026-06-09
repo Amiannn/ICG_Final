@@ -63,8 +63,9 @@ export function makeCampfire() {
   group.add(ember);
 
   // warm point light — gives the surrounding rocks/trunk/pond a real glow.
-  // Range/decay are set so the warmth reaches the cedar trunk (~4.6 units away).
-  const light = new THREE.PointLight(0xffa552, 0.0, 13.0, 1.0);
+  // Range/decay are set so the warmth reaches the cedar trunk (~4.6 units away)
+  // brightly enough that the trunk base reads warm at night.
+  const light = new THREE.PointLight(0xffa552, 0.0, 18.0, 0.85);
   light.position.set(0, 0.7, 0);
   light.castShadow = false;
   group.add(light);
@@ -101,7 +102,7 @@ export function makeCampfire() {
     const sy = 0.92 + 0.12 * Math.sin(time * 10.0);
     flameOuter.scale.set(1, sy, 1);
     flameInner.scale.set(1, sy * 1.05, 1);
-    light.intensity = 4.0 * f;
+    light.intensity = 7.0 * f;
   }
 
   return { group, update };

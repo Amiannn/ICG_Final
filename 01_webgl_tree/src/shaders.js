@@ -234,9 +234,9 @@ export const compositeFragment = /* glsl */ `
     vec3 color = texture2D(tColor, sampleUv).rgb;
 
     // overall paler / airier tone: lift toward soft off-white + slight desaturation
-    color = mix(color, vec3(0.95, 0.97, 0.94), 0.11);
+    color = mix(color, vec3(0.96, 0.97, 0.95), 0.18);
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
-    color = mix(vec3(luma), color, 0.88);
+    color = mix(vec3(luma), color, 0.86);
 
     // night grade: cool tint + a GENTLE darken. uNight is continuous (0..1) so it
     // fades smoothly through the cycle (1 = full night, 0 = day). Kept mild so the

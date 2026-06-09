@@ -24,15 +24,16 @@ export const realtimeMode = {
     pixel.update();
 
     cloudUniforms.uCloudTime.value = time * 0.015;
-    cloudUniforms.uCloudStrength.value = settings.clouds ? 1 : 0;
+    cloudUniforms.uCloudStrength.value = settings.clouds ? 0.45 : 0;
 
     // wind sways the grass + foliage across the whole scene (gustier in rain)
     windUniforms.uWindTime.value = time;
     windUniforms.uWindStrength.value = settings.rain ? 0.2 : 0.11;
 
-    // continuous day–night cycle: arc the sun + sweep the sky over ~30s
-    if (settings.cycle) {
-      const tod = ((time / 30) + 0.42) % 1; // start mid-morning
+    // time-of-day: an external driver (game mode's clock via ctx.tod) wins;
+    // otherwise the built-in continuous cycle arcs the sun over ~30s.
+    const tod = ctx.tod != null ? ctx.tod : settings.cycle ? ((time / 30) + 0.42) % 1 : null;
+    if (tod != null) {
       lighting.setTimeOfDay(tod);
       // night colour-grade follows the cycle's darkness (smooth, not a toggle)
       pipeline.composite.uniforms.uNight.value = 1 - lighting.dayness;
@@ -42,7 +43,7 @@ export const realtimeMode = {
     lighting.sun.target.updateMatrixWorld();
 
     // god rays are a sunshine effect — fade them out at night (and in rain)
-    const dayF = settings.cycle ? lighting.dayness : settings.night ? 0 : 1;
+    const dayF = settings.cycle || ctx.tod != null ? lighting.dayness : settings.night ? 0 : 1;
     pipeline.godray.uniforms.uStrength.value = 3.6 * Math.max(0, Math.min(1, dayF / 0.25));
 
     world.water.setTime(time);
@@ -59,12 +60,15 @@ export const realtimeMode = {
     // ecosystem grows with the tree: in Growth/Morph modes ctx.growthReveal is
     // the growthProgress; in real-time it's null → full meadow.
     const reveal = ctx.growthReveal == null ? 1 : ctx.growthReveal;
-    if (world.setGroundReveal) world.setGroundReveal(reveal); // grass + flowers
+    // grass + flowers can be decoupled from tree growth (ctx.groundReveal);
+    // otherwise they fill in with the tree like everything else.
+    const groundReveal = ctx.groundReveal == null ? reveal : ctx.groundReveal;
+    if (world.setGroundReveal) world.setGroundReveal(groundReveal);
 
     // wildlife appears in clear daylight: when it is sunny they walk / fly IN
     // from off-screen, and when night falls or it rains they head back out
     // (a smooth presence ramp, not a pop). Growth reveal staggers who is in.
-    const isDay = settings.cycle ? lighting.dayness > 0.45 : !settings.night;
+    const isDay = settings.cycle || ctx.tod != null ? lighting.dayness > 0.45 : !settings.night;
     const sunny = isDay && !settings.rain;
     if (world.animals) {
       world.animals.group.visible = true;

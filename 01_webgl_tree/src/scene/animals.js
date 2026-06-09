@@ -94,93 +94,145 @@ function makeDog() {
 
 const BUILDERS = { cow: makeCow, sheep: makeSheep, dog: makeDog };
 
-// [type, spawnX, spawnZ, scale, wanderRadius, walkSpeed] — clear of pond/tree.
-const PLACEMENTS = [
-  ["cow", -5.0, 3.6, 1.6, 1.7, 0.16],
-  ["sheep", -3.0, 5.6, 1.5, 1.3, 0.26],
-  ["sheep", -1.4, 7.0, 1.45, 1.2, 0.24],
-  ["dog", -6.2, 1.4, 1.4, 2.0, 0.5],
-  ["cow", 7.6, -2.2, 1.55, 1.4, 0.15],
-  ["sheep", 3.6, 8.0, 1.45, 1.1, 0.22],
+const TURN_RATE = 3.0;     // max heading change (rad/s) → no snap-turns
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// The animal pool — a few critters that take turns visiting (never all at once).
+// [type, scale]
+const POOL = [
+  ["cow", 1.6], ["sheep", 1.5], ["sheep", 1.45], ["dog", 1.4], ["cow", 1.55],
 ];
 
-const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-const smoother = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * x * (x * (x * 6 - 15) + 10); };
+// per-type gait
+const TRAITS = {
+  cow:   { spd: 1.0, stride: 7, amp: 0.5 },
+  sheep: { spd: 1.35, stride: 8, amp: 0.5 },
+  dog:   { spd: 2.1, stride: 10, amp: 0.7 },
+};
 
-const ENTRY_DIST = 9;    // how far off-screen an absent animal waits (world units)
-const ENTER_RATE = 0.16; // linear presence rate (eased) ≈6s for an unhurried stroll-in
-const TURN_RATE = 2.4;   // max heading change (rad/s) → no snap-turns
+// A few meadow routes: walk in from off-screen → graze spot → walk back out.
+// All graze spots avoid the pond + tree base.
+const PATHS = [
+  { enter: [-13, 3], graze: [-5.5, 2.5], exit: [-13, -1] },
+  { enter: [-9, -9], graze: [-3.5, -4.5], exit: [-13, -7] },
+  { enter: [-12, 7], graze: [-5, 6], exit: [-13, 9] },
+  { enter: [13, -7], graze: [8.5, -4], exit: [14, -9] },
+  { enter: [3, -11], graze: [-1, -6.5], exit: [6, -13] },
+  { enter: [-7, 10], graze: [-2.5, 8.5], exit: [-11, 12] },
+];
+
+// Visit pacing (in seconds of clear-weather daytime).
+const GAP_MIN = 8, GAP_MAX = 26;   // wait between visits
+const GRAZE_MIN = 4, GRAZE_MAX = 9; // how long a visitor lingers, head down
+
+// Walk the animal toward (tx,tz); animate trot + heading. Returns true on arrival.
+function walk(a, tx, tz, dt, t) {
+  const px = a.group.position.x, pz = a.group.position.z;
+  const dx = tx - px, dz = tz - pz;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.2) return true;
+  const step = Math.min(dist, a.spd * dt);
+  a.group.position.x = px + (dx / dist) * step;
+  a.group.position.z = pz + (dz / dist) * step;
+  a.group.position.y = Math.abs(Math.sin(t * a.stride + a.phase)) * 0.04; // gentle bob
+
+  const want = Math.atan2(-dz, dx); // model faces +x at heading 0
+  let d = want - a.heading;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  a.heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, d));
+  a.group.rotation.y = a.heading;
+
+  const swing = Math.sin(t * a.stride + a.phase) * a.strideAmp;
+  for (const hip of a.legs) hip.rotation.x = swing * hip.userData.gait;
+  a.head.rotation.x = 0.1 + 0.08 * Math.sin(t * a.stride * 0.5 + a.phase);
+  return false;
+}
+
+// Stand still, legs settling, head down nibbling at the grass.
+function graze(a, t) {
+  a.group.position.y = 0;
+  for (const hip of a.legs) hip.rotation.x *= 0.82; // ease legs to a stand
+  a.head.rotation.x = 0.72 + 0.08 * Math.sin(t * 6 + a.phase); // head down, nibbling
+}
 
 export function makeAnimals() {
   const group = new THREE.Group();
   const anims = [];
-  PLACEMENTS.forEach(([type, x, z, sc, wr, spd], i) => {
+  POOL.forEach(([type, sc], i) => {
     const a = BUILDERS[type]();
     a.group.scale.setScalar(sc);
+    a.group.visible = false;
     group.add(a.group);
-    // entry direction: a unit vector pointing from the scene centre out past the
-    // spawn point, so an absent animal waits off-screen along that ray and walks
-    // straight in toward its meadow spot.
-    const len = Math.hypot(x, z) || 1;
-    const ex = x / len, ez = z / len;
+    const tr = TRAITS[type];
     anims.push({
-      ...a,
-      sx: x, sz: z,
-      ex, ez,
-      wr: wr, wrz: wr * 0.7,
-      spd: spd,
-      phase: i * 1.9,
-      stride: 7 + (i % 3),     // leg cadence
-      strideAmp: type === "dog" ? 0.7 : 0.5,
-      baseScale: sc,
-      threshold: 0.12 + 0.72 * (i / (PLACEMENTS.length - 1)), // staggered with growth
-      l: 0,                    // linear presence (eased into p)
-      pPrev: 0,                // last frame's eased presence (for slide velocity)
-      heading: Math.atan2(ez, -ex), // start facing inward (the way it will walk in)
+      ...a, type,
+      spd: tr.spd, stride: tr.stride, strideAmp: tr.amp,
+      phase: i * 1.7,
+      state: "idle",    // idle → enter → graze → leave → idle
+      path: null,
+      grazeT: 0,
+      heading: 0,
     });
   });
   group.userData.noReflect = true; // keep barnyard out of the small pond mirror
 
   let lastT = null;
+  let gap = rand(2, 6); // first visitor wanders in a few seconds after load
 
-  // active = clear daylight (else they walk back off-screen); frac = growth reveal
-  // (each animal's staggered target presence), 1 in real-time mode.
-  function update(t, active = true, frac = 1) {
+  // Send 1 (usually) or 2 idle animals on a visit along distinct paths.
+  function startVisit() {
+    const idle = anims.filter((a) => a.state === "idle");
+    if (!idle.length) return;
+    const n = Math.min(Math.random() < 0.3 ? 2 : 1, idle.length);
+    const paths = [...PATHS];
+    for (let k = 0; k < n; k++) {
+      const a = idle.splice(Math.floor(Math.random() * idle.length), 1)[0];
+      const path = paths.splice(Math.floor(Math.random() * paths.length), 1)[0] || pick(PATHS);
+      a.path = path;
+      a.state = "enter";
+      a.group.position.set(path.enter[0], 0, path.enter[1]);
+      a.group.visible = true;
+      a.heading = Math.atan2(-(path.graze[1] - path.enter[1]), path.graze[0] - path.enter[0]);
+      a.group.rotation.y = a.heading;
+    }
+  }
+
+  // active = clear daylight; visitors only arrive while it's true, and head out
+  // early if it turns to night or rain. (frac is unused now — visits aren't
+  // gated by tree growth.)
+  function update(t, active = true) {
     const dt = lastT == null ? 0 : Math.min(0.05, Math.max(0, t - lastT));
     lastT = t;
+
+    if (active) {
+      gap -= dt;
+      if (gap <= 0) {
+        startVisit();
+        gap = rand(GAP_MIN, GAP_MAX);
+      }
+    }
+
     for (const a of anims) {
-      // ease presence toward its target so animals accelerate in / decelerate to a
-      // stop — they walk in and settle, never pop or jerk.
-      const target = active ? _ss(a.threshold - 0.16, a.threshold + 0.02, frac) : 0;
-      a.l += Math.max(-ENTER_RATE * dt, Math.min(ENTER_RATE * dt, target - a.l));
-      const p = smoother(a.l);
-      a.group.visible = p > 0.003;
-      if (!a.group.visible) { a.pPrev = p; continue; }
+      if (a.state === "idle") { a.group.visible = false; continue; }
+      // bad weather / nightfall → cut the visit short and walk off
+      if (!active && a.state !== "leave") a.state = "leave";
 
-      const ang = t * a.spd + a.phase;
-      // wander along a gentle ellipse around the spawn point …
-      const x = a.sx + Math.cos(ang) * a.wr;
-      const z = a.sz + Math.sin(ang) * a.wrz;
-      const off = (1 - p) * ENTRY_DIST; // … offset out to the off-screen entry point
-      a.group.position.set(x + a.ex * off, Math.abs(Math.sin(t * a.stride + a.phase)) * 0.04, z + a.ez * off);
-      a.group.scale.setScalar(a.baseScale); // constant size — no pop-in
-
-      // heading follows ACTUAL motion (wander tangent + the inward slide), so it
-      // faces the way it is travelling and rotates smoothly as the slide eases out.
-      const vx = -Math.sin(ang) * a.wr - a.ex * ENTRY_DIST * (p - a.pPrev) / (dt || 1);
-      const vz = Math.cos(ang) * a.wrz - a.ez * ENTRY_DIST * (p - a.pPrev) / (dt || 1);
-      a.pPrev = p;
-      const want = Math.atan2(-vz, vx);
-      let d = want - a.heading;
-      d = Math.atan2(Math.sin(d), Math.cos(d));               // shortest angle
-      a.heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, d)); // capped turn
-      a.group.rotation.y = a.heading;
-
-      // trot: diagonal leg pairs swing in antiphase the whole time it is moving
-      const swing = Math.sin(t * a.stride + a.phase) * a.strideAmp;
-      for (const hip of a.legs) hip.rotation.x = swing * hip.userData.gait;
-      // head bobs as it walks / grazes
-      a.head.rotation.x = 0.12 + 0.12 * Math.sin(t * a.stride * 0.5 + a.phase);
+      if (a.state === "enter") {
+        if (walk(a, a.path.graze[0], a.path.graze[1], dt, t)) {
+          a.state = "graze";
+          a.grazeT = rand(GRAZE_MIN, GRAZE_MAX);
+        }
+      } else if (a.state === "graze") {
+        graze(a, t);
+        a.grazeT -= dt;
+        if (a.grazeT <= 0) a.state = "leave";
+      } else if (a.state === "leave") {
+        if (walk(a, a.path.exit[0], a.path.exit[1], dt, t)) {
+          a.state = "idle";
+          a.group.visible = false;
+        }
+      }
     }
   }
 
