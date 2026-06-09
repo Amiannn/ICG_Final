@@ -5,6 +5,7 @@ import { Lighting } from "./lighting.js";
 import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
+import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
@@ -32,8 +33,19 @@ const dust = new DustParticles();
 scene.add(dust.points);
 const pipeline = new Pipeline(renderer, pixel);
 const rainSound = makeRainSound();
+const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
+
+// Audio can only start after a user gesture (browser autoplay policy), so kick
+// the ambient music off on the first interaction if it's enabled.
+function startAudioOnce() {
+  if (settings.music) music.set(true);
+  window.removeEventListener("pointerdown", startAudioOnce);
+  window.removeEventListener("keydown", startAudioOnce);
+}
+window.addEventListener("pointerdown", startAudioOnce);
+window.addEventListener("keydown", startAudioOnce);
 
 // Shared context passed to every mode plugin (see CONTRIBUTING.md §5).
 const ctx = {
@@ -159,6 +171,9 @@ function onSettingChange(key) {
     resize();
   } else if (key === "timeOfDay") {
     if (currentMode.scrubTime) currentMode.scrubTime(settings.timeOfDay); // game slider
+  } else if (key === "music") {
+    music.set(settings.music);
+    return;
   } else if (key === "night") {
     if (!settings.cycle) lighting.setNight(settings.night); // cycle overrides the static toggle
   } else if (key === "rain") {

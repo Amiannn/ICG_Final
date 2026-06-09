@@ -17,6 +17,7 @@ export const settings = {
   outlineStrength: 0.0,
   timeOfDay: 0.0, // game slider position (0 sunrise → 1 night); set by the UI
   species: "cedar", // game tree species: "cedar" (billboard cedar) | "morph"
+  music: true, // gentle procedural ambient background music
 };
 
 // Game-mode tunables: the sun + day counter advance on their own, the tree
