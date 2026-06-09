@@ -2,63 +2,204 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Pixel Bonsai</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
-    <canvas id="scene"></canvas>
+    <!-- Phone stage: 9:19.5 portrait, centred + letter-boxed on desktop -->
+    <div id="app">
+      <canvas id="scene"></canvas>
 
-    <div id="ui">
-      <header>
-        <h1>Pixel Bonsai</h1>
-        <p>Three.js recreation of davidhol.land's rendering style</p>
-      </header>
+      <!-- soft top/bottom gradient scrims so UI stays readable over the scene -->
+      <div class="scrim scrim-top"></div>
+      <div class="scrim scrim-bottom"></div>
 
-      <section class="modes">
-        <button class="mode active" data-mode="realtime">Real-time</button>
-        <button class="mode" data-mode="growth">Growth</button>
-        <button class="mode" data-mode="growthmorph">Morph</button>
-        <button class="mode" data-mode="raytrace">Path Trace</button>
-      </section>
+      <!-- faux phone status bar -->
+      <div class="statusbar">
+        <span class="clock">9:41</span>
+        <span class="status-icons">
+          <svg viewBox="0 0 18 12" class="si"><rect x="0" y="8" width="3" height="4"/><rect x="5" y="5" width="3" height="7"/><rect x="10" y="2" width="3" height="10"/><rect x="15" y="0" width="3" height="12" opacity=".35"/></svg>
+          <svg viewBox="0 0 16 12" class="si"><path d="M8 11.2 1.2 4.4a9.6 9.6 0 0 1 13.6 0L8 11.2Z" opacity=".35"/><path d="M8 11.2 4 7.2a5.6 5.6 0 0 1 8 0L8 11.2Z"/></svg>
+          <svg viewBox="0 0 26 12" class="si"><rect x="0.5" y="0.5" width="22" height="11" rx="3" fill="none" stroke="currentColor"/><rect x="2.5" y="2.5" width="17" height="7" rx="1.5"/><rect x="24" y="3.5" width="2" height="5" rx="1"/></svg>
+        </span>
+      </div>
 
-      <section>
-        <div class="row">
-          <label for="resolution">Vertical resolution</label>
-          <span id="resolution-value">420 px</span>
+      <div id="ui">
+        <!-- top bar: info card + book / settings -->
+        <div class="topbar">
+          <div class="info-card" id="info-card">
+            <div class="title">Pixel Bonsai</div>
+            <div class="subtitle"><span class="dot"></span><span id="day-label">Day 1</span></div>
+          </div>
+          <div class="top-actions">
+            <button class="round-btn" id="btn-book" title="Journal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.6C10.4 5.4 8.4 4.9 6 5.1c-.7 0-1.1.6-1.1 1.2v11c0 .8.6 1.3 1.4 1.2 2-.2 3.9.3 5.7 1.5 1.8-1.2 3.7-1.7 5.7-1.5.8.1 1.4-.4 1.4-1.2v-11c0-.6-.5-1.2-1.1-1.2-2.4-.2-4.4.3-6 1.5Z"/><path d="M12 6.6V19"/></svg>
+            </button>
+            <button class="round-btn" id="btn-settings" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.3 13.4a7.5 7.5 0 0 0 0-2.8l1.8-1.4-1.8-3.1-2.1.8a7.5 7.5 0 0 0-2.5-1.4L14.4 3h-3.6l-.3 2.5a7.5 7.5 0 0 0-2.5 1.4l-2.1-.8-1.8 3.1 1.8 1.4a7.5 7.5 0 0 0 0 2.8L2.3 14.8l1.8 3.1 2.1-.8a7.5 7.5 0 0 0 2.5 1.4l.3 2.5h3.6l.3-2.5a7.5 7.5 0 0 0 2.5-1.4l2.1.8 1.8-3.1-1.8-1.4Z"/></svg>
+            </button>
+          </div>
         </div>
-        <input id="resolution" type="range" min="120" max="540" step="30" value="420" />
-      </section>
 
-      <section class="toggles">
-        <button class="toggle" data-flag="motion">Camera drift</button>
-        <button class="toggle" data-flag="snap">Texel snap</button>
-        <button class="toggle" data-flag="outlines">Outlines</button>
-        <button class="toggle" data-flag="clouds">Cloud shadows</button>
-        <button class="toggle" data-flag="water">Water reflect</button>
-        <button class="toggle" data-flag="godrays">God rays</button>
-        <button class="toggle" data-flag="dust">Dust motes</button>
-        <button class="toggle" data-flag="rain">Rain</button>
-        <button class="toggle" data-flag="cycle">Day cycle</button>
-        <button class="toggle" data-flag="night">Night</button>
-        <button class="toggle" data-flag="grain">Film grain</button>
-      </section>
+        <!-- bottom cluster: notification + time slider + action sheet -->
+        <div class="bottom-cluster">
+          <button class="notify hidden" id="notify">
+            <span class="notify-icon" id="notify-icon">🦌</span>
+            <span class="notify-text" id="notify-text">A little deer visited!</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
 
-      <section>
-        <div class="row">
-          <label for="outline-strength">Outline strength</label>
-          <span id="outline-strength-value">0.00</span>
+          <!-- time-of-day slider -->
+          <div class="time-slider" id="time-slider">
+            <div class="track" id="time-track">
+              <div class="track-line"></div>
+              <div class="t-icons">
+                <button class="t-icon" data-t="0.00" title="Sunrise">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18"/><path d="M7.5 18a4.5 4.5 0 0 1 9 0"/><path d="M12 3.5v3"/><path d="m6 8 1.4 1.4"/><path d="m18 8-1.4 1.4"/><path d="M3.5 13h2"/><path d="M18.5 13h2"/></svg>
+                </button>
+                <button class="t-icon" data-t="0.25" title="Day">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.5"/><path d="M12 19v2.5"/><path d="M2.5 12H5"/><path d="M19 12h2.5"/><path d="m5.2 5.2 1.8 1.8"/><path d="m17 17 1.8 1.8"/><path d="m18.8 5.2-1.8 1.8"/><path d="m7 17-1.8 1.8"/></svg>
+                </button>
+                <button class="t-icon" data-t="0.50" title="Sunset">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18"/><path d="M7.5 18a4.5 4.5 0 0 1 9 0"/><path d="M12 6.5v-3"/><path d="m6 8 1.4 1.4"/><path d="m18 8-1.4 1.4"/><path d="M3.5 13h2"/><path d="M18.5 13h2"/></svg>
+                </button>
+                <button class="t-icon" data-t="0.78" title="Night">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13.5A7.2 7.2 0 0 1 10.5 4 7.2 7.2 0 1 0 20 13.5Z"/><path d="M18 4.5 18.4 6 20 6.4 18.4 6.8 18 8.3 17.6 6.8 16 6.4 17.6 6Z"/></svg>
+                </button>
+              </div>
+              <div class="knob" id="time-knob"></div>
+            </div>
+          </div>
+
+          <!-- action sheet -->
+          <div class="sheet" id="sheet">
+            <button class="sheet-handle" id="sheet-handle" aria-label="Toggle panel">
+              <span class="grabber"></span>
+            </button>
+            <div class="actions">
+              <button class="action" data-action="water">
+                <span class="action-icon">
+                  <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <g fill="#5f8fb0"><rect x="2" y="2" width="6" height="1"/><rect x="2" y="3" width="1" height="2"/><rect x="7" y="3" width="1" height="1"/></g>
+                    <g fill="#e9f3fb"><rect x="3" y="6" width="8" height="6"/><rect x="0" y="5" width="3" height="1"/><rect x="0" y="4" width="2" height="1"/></g>
+                    <g fill="#cfe6f4"><rect x="3" y="8" width="8" height="4"/><rect x="1" y="5" width="2" height="1"/></g>
+                    <g fill="#a7cde6"><rect x="3" y="6" width="8" height="1"/><rect x="11" y="6" width="1" height="6"/><rect x="4" y="12" width="7" height="1"/></g>
+                    <g fill="#6fa3c4"><rect x="9" y="4" width="3" height="1"/><rect x="11" y="5" width="1" height="1"/></g>
+                  </svg>
+                </span>
+                <span class="action-label">Water</span>
+              </button>
+
+              <button class="action" data-action="fertilize">
+                <span class="action-icon">
+                  <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <g fill="#caa06a"><rect x="4" y="5" width="8" height="9"/></g>
+                    <g fill="#a9824d"><rect x="11" y="5" width="1" height="9"/><rect x="4" y="13" width="8" height="1"/></g>
+                    <g fill="#e0bd85"><rect x="4" y="5" width="1" height="9"/><rect x="5" y="6" width="2" height="2"/></g>
+                    <g fill="#8a6336"><rect x="5" y="3" width="2" height="2"/><rect x="9" y="3" width="2" height="2"/><rect x="7" y="4" width="2" height="1"/></g>
+                    <g fill="#6db05a"><rect x="7" y="8" width="2" height="1"/><rect x="6" y="9" width="1" height="2"/><rect x="9" y="9" width="1" height="2"/><rect x="7" y="10" width="2" height="2"/></g>
+                    <g fill="#4f8a42"><rect x="8" y="9" width="1" height="3"/></g>
+                  </svg>
+                </span>
+                <span class="action-label">Fertilize</span>
+              </button>
+
+              <button class="action" data-action="bonemeal">
+                <span class="action-icon">
+                  <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <g fill="#d7dadf"><rect x="4" y="5" width="8" height="9"/></g>
+                    <g fill="#eef0f3"><rect x="4" y="5" width="1" height="9"/><rect x="5" y="6" width="2" height="3"/></g>
+                    <g fill="#b9bdc4"><rect x="11" y="5" width="1" height="9"/><rect x="4" y="13" width="8" height="1"/></g>
+                    <g fill="#5b5f66"><rect x="5" y="3" width="2" height="2"/><rect x="9" y="3" width="2" height="2"/><rect x="7" y="4" width="2" height="1"/></g>
+                    <g fill="#9aa0a8"><rect x="6" y="9" width="4" height="3"/></g>
+                    <g fill="#71757c"><rect x="6" y="9" width="4" height="1"/></g>
+                  </svg>
+                </span>
+                <span class="action-label">Bone Meal</span>
+              </button>
+            </div>
+          </div>
         </div>
-        <input id="outline-strength" type="range" min="0" max="2" step="0.05" value="0" />
-      </section>
 
-      <footer>
-        <span id="fps">–</span>
-        <button id="toggle-ui-collapse" title="Hide panel">hide</button>
-      </footer>
+        <!-- settings modal (graphics controls + technical-demo modes) -->
+        <div class="modal" id="settings-modal" hidden>
+          <div class="modal-card">
+            <div class="modal-head">
+              <h2>Settings</h2>
+              <button class="modal-close" data-close="settings-modal">✕</button>
+            </div>
+            <div class="modal-body">
+              <div class="modal-section-title">Graphics</div>
+              <div class="opt-grid">
+                <button class="opt" data-flag="motion">Camera drift</button>
+                <button class="opt" data-flag="snap">Texel snap</button>
+                <button class="opt" data-flag="outlines">Outlines</button>
+                <button class="opt" data-flag="clouds">Cloud shadows</button>
+                <button class="opt" data-flag="water">Water reflect</button>
+                <button class="opt" data-flag="godrays">God rays</button>
+                <button class="opt" data-flag="dust">Dust motes</button>
+                <button class="opt" data-flag="grain">Film grain</button>
+              </div>
+
+              <div class="opt-row">
+                <label for="resolution">Vertical resolution</label>
+                <span id="resolution-value">540 px</span>
+              </div>
+              <input id="resolution" type="range" min="120" max="540" step="30" value="540" />
+
+              <div class="opt-row">
+                <label for="outline-strength">Outline strength</label>
+                <span id="outline-strength-value">0.00</span>
+              </div>
+              <input id="outline-strength" type="range" min="0" max="2" step="0.05" value="0" />
+
+              <div class="modal-section-title" style="margin-top: 22px">Tree</div>
+              <div class="opt-grid">
+                <button class="opt species-opt" data-species="cedar">Cedar 杉木</button>
+                <button class="opt species-opt" data-species="morph">Morph 樹</button>
+              </div>
+
+              <div class="modal-section-title" style="margin-top: 22px">Mode</div>
+              <div class="opt-grid">
+                <button class="opt mode-opt" data-mode="game">Game</button>
+                <button class="opt mode-opt" data-mode="realtime">Real-time</button>
+                <button class="opt mode-opt" data-mode="growth">Growth</button>
+                <button class="opt mode-opt" data-mode="growthmorph">Morph</button>
+                <button class="opt mode-opt" data-mode="raytrace">Path Trace</button>
+              </div>
+
+              <div class="opt-row stat-row">
+                <span>Performance</span>
+                <span id="fps">– fps</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- journal modal -->
+        <div class="modal" id="book-modal" hidden>
+          <div class="modal-card">
+            <div class="modal-head">
+              <h2>Journal</h2>
+              <button class="modal-close" data-close="book-modal">✕</button>
+            </div>
+            <div class="modal-body">
+              <ul class="journal" id="journal"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <button id="ui-show" title="Show panel" hidden>menu</button>
 
     <script type="module" src="./src/main.js"></script>
   </body>

@@ -89,3 +89,37 @@ export function makeGrass({ count = 6000, area = 26, exclude = [] } = {}) {
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   return mesh;
 }
+
+// Grass tufts placed at explicit world positions — used to dress the tops of
+// rocks + hill slopes so they aren't bare. Each spot: { x, y, z, w, h, t },
+// where y is the SURFACE height (base of the tuft) and t∈[0,1] tints it.
+export function makePatchGrass(spots) {
+  const tex = makeGrassTuft("#cbe592", "#5f8746", 64);
+  const mat = instancedBillboardMaterial(tex, { color: 0xffffff, upright: true });
+
+  const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), mat, spots.length);
+  mesh.userData.skipNormal = true;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const col = new THREE.Color();
+  const dark = new THREE.Color(0x4f7340);
+  const light = new THREE.Color(0xb6d488);
+
+  spots.forEach((sp, i) => {
+    pos.set(sp.x, sp.y + sp.h * 0.5, sp.z);
+    scl.set(sp.w, sp.h, 1);
+    m.compose(pos, q, scl);
+    mesh.setMatrixAt(i, m);
+    col.copy(dark).lerp(light, sp.t ?? 0.5);
+    mesh.setColorAt(i, col);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  return mesh;
+}

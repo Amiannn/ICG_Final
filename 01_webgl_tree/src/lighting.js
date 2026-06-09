@@ -46,15 +46,15 @@ export class Lighting {
     this._kf = [
       // night kept as a visible MOONLIT blue (not near-black) so the cycle reads
       // as continuous — no black-out at the bottom of the night.
-      { t: 0.00, sky: 0x1d2c50, fog: 0x24314e, sun: 0x9aa8d8, si: 0.55, hi: 0.78, g: 0x2b3654 },
-      { t: 0.20, sky: 0x44567c, fog: 0x46506e, sun: 0x9aa0d0, si: 0.70, hi: 0.88, g: 0x3a4258 },
+      { t: 0.00, sky: 0x1d2c50, fog: 0x5e6e8a, sun: 0x9aa8d8, si: 0.55, hi: 0.78, g: 0x2b3654 },
+      { t: 0.20, sky: 0x44567c, fog: 0x70809c, sun: 0x9aa0d0, si: 0.70, hi: 0.88, g: 0x3a4258 },
       { t: 0.27, sky: 0xef9d6a, fog: 0xf0b487, sun: 0xffae66, si: 1.30, hi: 0.95, g: 0x6e6448 },
       { t: 0.40, sky: 0xa9d6df, fog: 0xc4e3e0, sun: 0xffe9c0, si: 2.10, hi: 1.15, g: 0x6f8a52 },
       { t: 0.50, sky: 0xbfe0df, fog: 0xc4e3e0, sun: 0xfff1c4, si: 2.50, hi: 1.30, g: 0x6f8a52 },
       { t: 0.62, sky: 0xb7dcdb, fog: 0xc4e3e0, sun: 0xffe6b0, si: 2.10, hi: 1.15, g: 0x6f8a52 },
       { t: 0.73, sky: 0xe8845a, fog: 0xeaa885, sun: 0xff8a52, si: 1.20, hi: 0.85, g: 0x6a5840 },
-      { t: 0.80, sky: 0x6a5a82, fog: 0x544c68, sun: 0xb094c4, si: 0.7, hi: 0.7, g: 0x40395a },
-      { t: 0.88, sky: 0x2e3a5e, fog: 0x303a58, sun: 0x93a0d4, si: 0.58, hi: 0.78, g: 0x2c3658 },
+      { t: 0.80, sky: 0x6a5a82, fog: 0x7e7290, sun: 0xb094c4, si: 0.7, hi: 0.7, g: 0x40395a },
+      { t: 0.88, sky: 0x2e3a5e, fog: 0x687288, sun: 0x93a0d4, si: 0.58, hi: 0.78, g: 0x2c3658 },
     ].map((k) => ({
       t: k.t, sky: new THREE.Color(k.sky), fog: new THREE.Color(k.fog),
       sun: new THREE.Color(k.sun), si: k.si, hi: k.hi, g: new THREE.Color(k.g),

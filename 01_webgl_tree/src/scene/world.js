@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { toonMaterial } from "../materials.js";
 import { makeTree } from "./tree.js";
-import { makeGrass } from "./grass.js";
+import { makeGrass, makePatchGrass } from "./grass.js";
 import { Water } from "./water.js";
 import { makeAnimals } from "./animals.js";
 import { makeBirds } from "../effects/birds.js";
@@ -70,6 +70,31 @@ export function buildWorld(scene) {
     scene.add(hill);
   }
 
+  // mid-distance hills — fill the skyline between the close hills and the far
+  // horizon ring so the background behind the cedar isn't empty. Kept at
+  // radius ~26-30 from the scene centre: that is OUTSIDE the camera's orbit
+  // (eye sits at xz-radius ~18), so the low game camera can never clip into
+  // them at any yaw. Inside the fog far plane, so they read as solid hills.
+  const midHills = [
+    [27, -5, 7.5, 3.4, 5.0],
+    [20, -19, 8.5, 3.8, 5.4],
+    [-2, -27, 8.0, 3.6, 5.2],
+    [-20, -16, 8.5, 3.6, 5.4],
+    [-27, 3, 8.0, 3.4, 5.2],
+    [-16, 22, 7.5, 3.2, 5.0],
+    [8, 28, 8.0, 3.4, 5.2],
+    [26, 15, 7.5, 3.2, 5.0],
+  ];
+  for (const [x, z, w, h, d] of midHills) {
+    const hill = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mats.hill);
+    hill.position.set(x, h * 0.3, z);
+    hill.scale.set(w, h, d);
+    hill.rotation.set(0.11, x * 0.17, -0.06);
+    hill.castShadow = true;
+    hill.receiveShadow = true;
+    scene.add(hill);
+  }
+
   // water — a large foreground lake. With the iso/orthographic camera a tall
   // tree's mirror image streaks far toward the camera (along world x−z ≈ const),
   // so the lake must be big and reach forward to actually catch the trunk+canopy
@@ -79,7 +104,10 @@ export function buildWorld(scene) {
   // tree on its back shore. The iso camera makes a tree mirror toward +x/+z
   // along world x−z ≈ const, so the pond sits on that streak; with the grass
   // excluded from the mirror the cedar reflects clearly against the sky.
-  const water = new Water({ width: 7, depth: 5.5, y: 0.06, center: new THREE.Vector3(4.7, 0, 3.4) });
+  // bigger pond, grown toward the camera (+x/+z) so the cedar stays on the
+  // back shore rather than ending up in the water. The back edge (toward the
+  // tree) stays ~where it was; the lake just reaches further into the foreground.
+  const water = new Water({ width: 10, depth: 7.5, y: 0.06, center: new THREE.Vector3(6.0, 0, 4.4) });
   water.material.uniforms.uReflectStrength.value = 0.9;
   scene.add(water.mesh);
 
@@ -101,6 +129,24 @@ export function buildWorld(scene) {
     scene.add(rock);
   }
 
+  // big mid-distance boulders — larger faceted rocks dotting the meadow behind
+  // the cedar so the middle distance has some mass to read against the hills.
+  // kept at radius < ~15 (clear foreground) so they never sit on the camera's
+  // ~18-unit orbit and clip the view at any yaw
+  const bigRocks = [
+    [-10, -6, 1.7], [-13, 5, 1.4], [9, -11, 1.6], [13, 6, 1.3],
+    [-6, 10, 1.3], [12, -6, 1.5], [-11, -3, 1.5], [6, 12, 1.2],
+  ];
+  for (const [x, z, s] of bigRocks) {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mats.rock);
+    rock.position.set(x, s * 0.45, z);
+    rock.scale.set(1.0 + rng2() * 0.4, 0.55 + rng2() * 0.35, 0.85 + rng2() * 0.3);
+    rock.rotation.set(rng2() * 0.4, x * 0.7 + rng2(), -0.1 + rng2() * 0.3);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    scene.add(rock);
+  }
+
   // the tree
   const tree = makeTree();
   tree.position.set(2.6, 0, 1.2);
@@ -111,9 +157,9 @@ export function buildWorld(scene) {
   const flowerList = [];
   const blooms = [mats.flowerYellow, mats.flowerPink, mats.flowerWhite];
   const frand = mulberry(99);
-  for (let i = 0; i < 60; i++) {
-    const x = (frand() - 0.5) * 22;
-    const z = (frand() - 0.5) * 22;
+  for (let i = 0; i < 95; i++) {
+    const x = (frand() - 0.5) * 32;
+    const z = (frand() - 0.5) * 32;
     const wb = water.bounds;
     if (x > wb.minX - 0.4 && x < wb.maxX + 0.4 && z > wb.minZ - 0.4 && z < wb.maxZ + 0.4) continue;
     if (x > 1.4 && x < 3.8 && z > 0.0 && z < 2.4) continue; // tree base
@@ -121,6 +167,47 @@ export function buildWorld(scene) {
     flowers.add(f);
     flowerList.push(f);
   }
+
+  // grass tufts + a few wildflowers clinging to the rock tops and hill slopes,
+  // so the boulders + hills aren't bare. Tufts sit on each dome's upper surface.
+  const vrng = mulberry(7777);
+  const grassSpots = [];
+  const domeTufts = (cx, cy, cz, rx, ry, rz, n) => {
+    for (let i = 0; i < n; i++) {
+      const a = vrng() * Math.PI * 2;
+      const rad = Math.sqrt(vrng());
+      const dy = Math.sqrt(Math.max(0, 1 - rad * rad));
+      grassSpots.push({
+        x: cx + Math.cos(a) * rad * rx * 0.9,
+        z: cz + Math.sin(a) * rad * rz * 0.9,
+        y: cy + dy * ry,
+        w: 0.16 + vrng() * 0.12,
+        h: 0.22 + vrng() * 0.2,
+        t: vrng(),
+      });
+    }
+  };
+  for (const [x, z, s] of bigRocks) domeTufts(x, s * 0.45, z, s * 1.1, s * 0.6, s * 0.95, 10);
+  for (const [x, z, w, h, d] of hillPlacements) domeTufts(x, h * 0.3, z, w, h, d, 22);
+  for (const [x, z, w, h, d] of midHills) domeTufts(x, h * 0.3, z, w, h, d, 16);
+  const patchGrass = makePatchGrass(grassSpots);
+  patchGrass.userData.noReflect = true;
+  scene.add(patchGrass);
+
+  const perch = (cx, cy, cz, rx, ry, rz, n, k) => {
+    for (let i = 0; i < n; i++) {
+      const a = vrng() * Math.PI * 2;
+      const rad = Math.sqrt(vrng()) * 0.7;
+      const dy = Math.sqrt(Math.max(0, 1 - rad * rad));
+      const f = makeFlower(cx + Math.cos(a) * rad * rx, cz + Math.sin(a) * rad * rz, blooms[(k + i) % blooms.length], 0.6 + vrng() * 0.4, mats.grass);
+      f.position.y = cy + dy * ry;
+      flowers.add(f);
+      flowerList.push(f);
+    }
+  };
+  bigRocks.forEach(([x, z, s], i) => perch(x, s * 0.45, z, s * 1.0, s * 0.55, s * 0.85, 2, i));
+  hillPlacements.forEach(([x, z, w, h, d], i) => perch(x, h * 0.3, z, w * 0.8, h, d * 0.8, 3, i));
+
   scene.add(flowers);
 
   // grass field (avoid water + tree base)
