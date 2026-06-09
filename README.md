@@ -43,15 +43,15 @@ The slider/sheet collapse with the grabber to reveal the full scene; the gear op
 | --- | --- |
 | ![night](docs/screenshots/demo_night.png) | ![rain](docs/screenshots/demo_rain.png) |
 
-| Wildlife wanders the meadow | Photoreal path trace |
-| --- | --- |
-| ![wildlife](docs/screenshots/demo_wildlife.png) | ![path trace](docs/screenshots/compare_pt_photoreal.png) |
+**Raise the tree, day by day** — a Day-1 sprout → the crown fills in → the full cedar:
 
-**Tree growth** — sprout → leaves fill in (sparse → dense) → the full cedar:
-
-| ① twigs + first buds | ② crown fills in | ③ full cedar |
+| Day 3 | Day 11 | Day 27 |
 | --- | --- | --- |
 | ![growth 1](docs/screenshots/demo_growth_1.png) | ![growth 2](docs/screenshots/demo_growth_2.png) | ![growth 3](docs/screenshots/demo_growth_3.png) |
+
+**Path Trace** — a photoreal GPU render of the same tree (Settings → Mode):
+
+![path trace](docs/screenshots/compare_pt_photoreal.png)
 
 ## Quick start
 
