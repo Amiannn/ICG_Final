@@ -8,8 +8,9 @@ in a phone-shaped portrait UI, and the whole scene is drawn through a low-resolu
 cel-shaded, outlined pipeline for a clean pixel-art look.
 
 Under the hood it's also a small graphics showcase: the same scene can be viewed in
-several **technical modes** — staged tree growth, textbook morph-target morphing, and
-a photoreal **GPU path tracer** — all reachable from the in-game Settings panel.
+several **technical modes** — staged tree growth and textbook morph-target morphing —
+reachable from the in-game Settings panel. (A photoreal GPU path-tracer mode has been
+retired to [`legacy/`](legacy/) for this version.)
 
 The rendering style is inspired by David Holland's write-up on 3D pixel art
 rendering (<https://www.davidhol.land/articles/3d-pixel-art-rendering/>); every
@@ -49,10 +50,6 @@ The slider/sheet collapse with the grabber to reveal the full scene; the gear op
 | --- | --- | --- |
 | ![growth 1](docs/screenshots/demo_growth_1.png) | ![growth 2](docs/screenshots/demo_growth_2.png) | ![growth 3](docs/screenshots/demo_growth_3.png) |
 
-**Path Trace** — a photoreal GPU render of the same tree (Settings → Mode):
-
-![path trace](docs/screenshots/compare_pt_photoreal.png)
-
 ## Quick start
 
 ```bash
@@ -62,13 +59,12 @@ npm run dev        # open http://localhost:5173 (already runs with --host for yo
 ```
 
 Open the LAN URL on a phone for the full-screen portrait experience. Build a static
-bundle with `npm run build` (output in `01_webgl_tree/dist/`). Path Trace needs
-WebGL2; it accumulates samples over time and converges fastest on a real GPU.
+bundle with `npm run build` (output in `01_webgl_tree/dist/`).
 
 ## Modes
 
 The game is the default mode. Open **Settings → Mode** to switch (or deep-link with
-`?mode=realtime` / `growth` / `growthmorph` / `raytrace`):
+`?mode=realtime` / `growth` / `growthmorph`):
 
 - **Game** — the tree-raising game described above (real-time pipeline + game clock).
 - **Real-time** — the full living scene with no game layer: day–night cycle, weather,
@@ -77,9 +73,6 @@ The game is the default mode. Open **Settings → Mode** to switch (or deep-link
   parametric developmental morph). Grass, flowers, animals and birds fill in as it grows.
 - **Morph** — a textbook morph-target version of the growth (every vertex is
   interpolated between a sapling and a mature key-shape).
-- **Path Trace** — a photoreal GPU path-tracer showcase of the same tree: HDR
-  sky+sun environment, real 3D foliage, detail-textured ground/bark, a near-mirror
-  rippled lake, and a pixel-art post pass.
 
 ## What's in the renderer
 
@@ -126,11 +119,9 @@ upscaled with nearest-neighbour sampling, so everything reads as crisp pixels.
   dedicated sprout↔mature mesh whose every vertex is linearly interpolated (the
   "morph" species / Morph mode).
 
-**Path tracing** ([`03_ray_tracing`](03_ray_tracing/))
-- A photoreal GPU path tracer (three-gpu-pathtracer + three-mesh-bvh): HDR sky+sun
-  environment, depth-of-field hero framing, real 3D foliage clumps (not flat
-  cards), detail textures (grass/bark/water normals), and a rippled near-mirror
-  lake, finished with a pixel-art post chain.
+**Path tracing** — *retired to [`legacy/03_ray_tracing`](legacy/03_ray_tracing/) for
+this version.* A photoreal GPU path tracer (three-gpu-pathtracer + three-mesh-bvh) of
+the same tree; kept for reference but not wired into the current build.
 
 ## Project structure
 
@@ -141,10 +132,11 @@ see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ```text
 ICG_Final/
-├── 01_webgl_tree/    # real-time WebGL Pixel Bonsai (Three.js + Vite) — the base
-│                     #   + the mobile game UI, day-night, weather, wind, wildlife
+├── 01_webgl_tree/    # real-time WebGL Pixel Bonsai (Three.js + Vite) — the game + base
+│                     #   mobile game UI, day-night, weather, wind, wildlife
 ├── 02_tree_growth/   # growth morphing: twig sprout -> full cedar (+ morph-target tree)
-├── 03_ray_tracing/   # photoreal path-traced showcase of the same tree
+├── legacy/
+│   └── 03_ray_tracing/   # retired photoreal path-traced showcase (not in this build)
 └── docs/             # screenshots and notes
 ```
 

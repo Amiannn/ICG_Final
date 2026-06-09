@@ -12,7 +12,7 @@ import { realtimeMode } from "./modes/realtime.js";
 import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
 import { growthMorphMode } from "../../02_tree_growth/src/growth_morph.js";
-import { raytraceMode } from "../../03_ray_tracing/src/raytrace_mode.js";
+// Ray tracing has been retired to ../../legacy/03_ray_tracing for this version.
 
 const canvas = document.querySelector("#scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
@@ -63,14 +63,14 @@ ctx.setRain = (on) => {
   applyDynamicSettings();
 };
 
-const modes = { game: gameMode, realtime: realtimeMode, growth: growthMode, growthmorph: growthMorphMode, raytrace: raytraceMode };
+const modes = { game: gameMode, realtime: realtimeMode, growth: growthMode, growthmorph: growthMorphMode };
 let currentMode = gameMode;
 currentMode.init(ctx);
 
 initUI(onSettingChange, onAction, switchMode, onSpecies);
 applyAllSettings();
 
-// Dev hook: `?mode=raytrace` (or growth/growthmorph) jumps straight into that
+// Dev hook: `?mode=growthmorph` (or realtime/growth) jumps straight into that
 // mode on load — handy for headless-screenshot scripts and quick deep links.
 const _qMode = new URLSearchParams(location.search).get("mode");
 if (_qMode && modes[_qMode] && modes[_qMode] !== currentMode) switchMode(_qMode);
