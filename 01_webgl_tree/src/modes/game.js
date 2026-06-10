@@ -89,6 +89,14 @@ export const gameMode = {
     this.music = new Audio(import.meta.env.BASE_URL + "festival_music.mp3");
     this.music.loop = false; // the track plays ONCE — its ending closes the show
     this.music.volume = 0.8;
+    // the moment the track truly finishes, the dancers strike their end pose —
+    // event-driven, so no frame-loop or duration-metadata quirk can miss it
+    this.music.addEventListener("ended", () => {
+      if (this.festival && !this._posed) {
+        this._posed = true;
+        this.ctx?.world.animals?.endPose?.();
+      }
+    });
     // unlock the audio element on the first user tap so it can auto-play at Day 30
     this._prime = () => {
       if (this.music) this.music.play().then(() => { this.music.pause(); this.music.currentTime = 0; }).catch(() => {});
@@ -164,7 +172,11 @@ export const gameMode = {
       const m = this.music;
       const dur = m && isFinite(m.duration) && m.duration > 1 ? m.duration : 25.3;
       const tm = m && m.currentTime > 0.2 ? m.currentTime : this.festivalT;
-      if (!this._posed && tm >= dur - 1.5) {
+      // pose on the final bars — OR the instant the element reports it has
+      // actually ENDED (VBR mp3s can report a duration longer than the real
+      // stream, in which case currentTime never reaches duration−1.5; checking
+      // m.ended makes "music over → strike the pose" unconditional)
+      if (!this._posed && (tm >= dur - 1.5 || (m && m.ended))) {
         this._posed = true;
         ctx.world.animals?.endPose?.();
       }
@@ -298,7 +310,11 @@ export const gameMode = {
     // final shells fade out right over the held end pose
     this.ctx.fireworks?.start(24);
     this.ctx.world.animals?.party(true);
-    if (this.music) { this.music.currentTime = 0; this.music.play().catch(() => {}); }
+    if (this.music) {
+      this.music.loop = false; // re-assert: the show must end with the song
+      this.music.currentTime = 0;
+      this.music.play().catch(() => {});
+    }
     notifyEvent("🎆", "Day 30 — the festival begins!");
   },
 
