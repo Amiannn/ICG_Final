@@ -16,7 +16,9 @@ export class PixelCamera {
   constructor() {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
     this.viewHeight = 30; // world units visible vertically (pulled back, but the ground still fills the lower frame)
-    this.target = new THREE.Vector3(1.8, 8.2, 1.0);
+    // target height frames the scene high on the phone screen, so the pond in
+    // the foreground stays above (not behind) the bottom HUD cluster
+    this.target = new THREE.Vector3(1.8, 2.8, 1.0);
     // Iso offset from target to eye. baseEyeOffset is the fixed-Y rig; eyeOffset
     // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
     // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
@@ -60,7 +62,7 @@ export class PixelCamera {
     // viewing angle stays locked (pure translation, which snaps cleanly).
     this.desiredTarget.set(
       1.8 + Math.sin(time * 0.16) * 1.5,
-      8.2,
+      2.8,
       1.0 + Math.cos(time * 0.12) * 1.2,
     );
     this.desiredPosition.copy(this.desiredTarget).add(this.eyeOffset);
