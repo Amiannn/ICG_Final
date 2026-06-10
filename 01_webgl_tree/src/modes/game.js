@@ -2,7 +2,7 @@ import { realtimeMode } from "./realtime.js";
 import { makeMorphTree } from "../../../02_tree_growth/src/morph_tree.js";
 import { makeCedarGrowth } from "../../../02_tree_growth/src/cedar_growth.js";
 import { game } from "../config.js";
-import { setDay, reflectTime, notifyEvent, setWaterCount } from "../ui.js";
+import { setDay, reflectTime, notifyEvent, setWaterCount, setFertCount } from "../ui.js";
 
 // Game mode — the "Pixel Bonsai" experience.
 //
@@ -81,11 +81,17 @@ export const gameMode = {
         const [icon, text] = VISIT[type] || ["🐾", "A visitor arrived!"];
         notifyEvent(icon, text);
       };
+      ctx.world.animals.onPoop = () => {
+        notifyEvent("💩", "A visitor left droppings — tap to collect!");
+      };
     }
 
     // water is a resource: start with one charge, refill by tapping the pond
     this.water = 1;
     setWaterCount(this.water);
+    // fertiliser too: collect animal droppings to restock
+    this.fert = 1;
+    setFertCount(this.fert);
 
     setDay(game.startDay);
     this._apply(ctx);
@@ -167,9 +173,16 @@ export const gameMode = {
       const top = 3.5 + 17 * g;
       const radius = 1.6 + 3.2 * g;
       this.ctx.watering?.trigger(this.ctx.tree?.position, top, radius);
-      this.dayFloat += 1; // a drink = one day's growth
-    } else if (name === "fertilize") this.dayFloat += 1;
-    else if (name === "bonemeal") this.dayFloat += 2;
+      this.dayFloat += 0.5; // a drink = half a day's growth
+    } else if (name === "fertilize") {
+      if (this.fert <= 0) {
+        notifyEvent("🚫", "No fertilizer — collect animal droppings!");
+        return false;
+      }
+      this.fert -= 1;
+      setFertCount(this.fert);
+      this.dayFloat += 1;
+    } else if (name === "bonemeal") this.dayFloat += 2;
     else if (name === "skipday30") {
       // demo shortcut: jump straight to the fully-grown tree (mid-morning)
       const target = game.growthDays - game.startDay + 0.45;
@@ -185,6 +198,13 @@ export const gameMode = {
     this.water += 1;
     setWaterCount(this.water);
     notifyEvent("💧", "Fetched water from the pond! (+1)");
+  },
+
+  // tap a dropping → a charge of fertiliser
+  collectFertilizer() {
+    this.fert += 1;
+    setFertCount(this.fert);
+    notifyEvent("💩", "Droppings collected — +1 fertilizer!");
   },
 
   // fixed close-up framing (the camera does NOT pull back as the tree grows —

@@ -156,22 +156,24 @@ function initActions(onAction) {
   });
 }
 
-// water inventory readout on the Water button (badge + greyed-out icon at 0)
-let _lastWater = null;
-export function setWaterCount(n) {
-  const el = $("#water-count");
+// resource readouts on the action buttons (badge + greyed-out icon at 0)
+const _lastCount = {};
+function setResourceCount(action, badgeId, n) {
+  const el = $("#" + badgeId);
   if (el) {
     el.textContent = n;
-    if (_lastWater != null && n > _lastWater) {
+    if (_lastCount[action] != null && n > _lastCount[action]) {
       el.classList.remove("bump");
       void el.offsetWidth;
       el.classList.add("bump");
     }
   }
-  _lastWater = n;
-  const btn = document.querySelector('.action[data-action="water"]');
+  _lastCount[action] = n;
+  const btn = document.querySelector(`.action[data-action="${action}"]`);
   if (btn) btn.classList.toggle("empty", n <= 0);
 }
+export const setWaterCount = (n) => setResourceCount("water", "water-count", n);
+export const setFertCount = (n) => setResourceCount("fertilize", "fert-count", n);
 
 // Pond-scoop animation: the watering can pops up at the tap point, dips to
 // scoop (with a ripple ring), then flies to the Water button. `onDone` fires
@@ -203,6 +205,34 @@ export function playScoop(clientX, clientY, onDone) {
     wrap.remove();
     onDone?.();
   }, 1080);
+}
+
+// Dropping pick-up: a little 💩 pops up at the tap point and flies to the
+// Fertilize button; the charge lands with it.
+export function playPickup(clientX, clientY, onDone) {
+  const app = document.querySelector("#app");
+  const rect = app.getBoundingClientRect();
+  const wrap = document.createElement("div");
+  wrap.className = "scoop-anim";
+  wrap.style.left = `${clientX - rect.left}px`;
+  wrap.style.top = `${clientY - rect.top}px`;
+  wrap.innerHTML = `<span class="pickup-icon">💩</span>`;
+  app.appendChild(wrap);
+
+  const badge = $("#fert-count");
+  const b = badge ? badge.getBoundingClientRect() : { left: clientX, top: clientY, width: 0, height: 0 };
+  const tx = b.left + b.width / 2 - clientX;
+  const ty = b.top + b.height / 2 - clientY;
+  setTimeout(() => {
+    const ic = wrap.querySelector(".pickup-icon");
+    ic.style.transition = "transform 0.45s cubic-bezier(0.45, -0.15, 0.8, 0.6), opacity 0.45s ease";
+    ic.style.transform = `translate(${tx}px, ${ty}px) scale(0.3)`;
+    ic.style.opacity = "0.25";
+  }, 300);
+  setTimeout(() => {
+    wrap.remove();
+    onDone?.();
+  }, 800);
 }
 
 // ---- journal + notification pill ------------------------------------------
