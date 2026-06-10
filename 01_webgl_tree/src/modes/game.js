@@ -2,7 +2,7 @@ import { realtimeMode } from "./realtime.js";
 import { makeMorphTree } from "../../../02_tree_growth/src/morph_tree.js";
 import { makeCedarGrowth } from "../../../02_tree_growth/src/cedar_growth.js";
 import { game } from "../config.js";
-import { setDay, reflectTime, notifyEvent } from "../ui.js";
+import { setDay, reflectTime, notifyEvent, setWaterCount } from "../ui.js";
 
 // Game mode — the "Pixel Bonsai" experience.
 //
@@ -80,6 +80,10 @@ export const gameMode = {
       };
     }
 
+    // water is a resource: start with one charge, refill by tapping the pond
+    this.water = 1;
+    setWaterCount(this.water);
+
     setDay(game.startDay);
     this._apply(ctx);
   },
@@ -148,6 +152,12 @@ export const gameMode = {
 
   action(name) {
     if (name === "water") {
+      if (this.water <= 0) {
+        notifyEvent("🚱", "Out of water — tap the pond!");
+        return false; // vetoed: the UI skips its pulse/toast
+      }
+      this.water -= 1;
+      setWaterCount(this.water);
       // sprinkle the tree as it currently stands (height/spread follow growth)
       const dayIndex = game.startDay - 1 + this.dayFloat;
       const g = Math.min(1, Math.max(0, dayIndex / (game.growthDays - 1)));
@@ -157,6 +167,13 @@ export const gameMode = {
       this.dayFloat += 1; // a drink = one day's growth
     } else if (name === "fertilize") this.dayFloat += 1;
     else if (name === "bonemeal") this.dayFloat += 2;
+  },
+
+  // tap the pond → scoop a charge of water
+  collectWater() {
+    this.water += 1;
+    setWaterCount(this.water);
+    notifyEvent("💧", "Fetched water from the pond! (+1)");
   },
 
   // ---- teardown ----------------------------------------------------------

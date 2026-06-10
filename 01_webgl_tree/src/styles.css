@@ -377,6 +377,7 @@ body {
   transform: translateY(2px) scale(0.96);
 }
 .action-icon {
+  position: relative;
   width: 86px;
   height: 86px;
   border-radius: 50%;
@@ -404,6 +405,76 @@ body {
 }
 .action.pulse .action-icon {
   animation: pop 0.4s ease;
+}
+/* water inventory badge on the Water button */
+.count-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  background: var(--glass-card);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(20, 35, 25, 0.3);
+}
+.action.empty .action-icon img {
+  opacity: 0.45;
+  filter: grayscale(0.6) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
+}
+
+/* ---- pond scoop animation: can dips at the tap point, then flies to the
+   Water button ---- */
+.scoop-anim {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+}
+.scoop-can {
+  position: absolute;
+  left: -28px;
+  top: -34px;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
+  animation: scoopTilt 0.52s ease;
+}
+@keyframes scoopTilt {
+  /* rises out of the water: surfaces from below, scoops low, lifts up */
+  0% { transform: rotate(0deg) translateY(16px) scale(0.7); opacity: 0; }
+  28% { transform: rotate(-34deg) translateY(11px) scale(1); opacity: 1; }
+  60% { transform: rotate(-40deg) translateY(9px) scale(1); }
+  100% { transform: rotate(0deg) translateY(0) scale(1); opacity: 1; }
+}
+.scoop-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border: 2px solid rgba(240, 250, 255, 0.85);
+  border-radius: 50%;
+  animation: ringExpand 0.7s ease-out forwards;
+}
+@keyframes ringExpand {
+  from { transform: scale(0.4); opacity: 0.9; }
+  to { transform: scale(6); opacity: 0; }
+}
+.count-badge.bump {
+  animation: badgeBump 0.35s ease;
+}
+@keyframes badgeBump {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.45); }
+  100% { transform: scale(1); }
 }
 @keyframes pop {
   0% { transform: scale(1); }

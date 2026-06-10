@@ -9,7 +9,7 @@ import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { Pipeline } from "./pipeline.js";
-import { initUI, tickFps } from "./ui.js";
+import { initUI, tickFps, playScoop } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
 import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
@@ -109,10 +109,14 @@ resize();
 canvas.style.cursor = "grab";
 let dragging = false;
 let lastX = 0;
+let downX = 0, downY = 0, downT = 0; // to tell a tap from a drag
 const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
 canvas.addEventListener("pointerdown", (e) => {
   dragging = true;
   lastX = e.clientX;
+  downX = e.clientX;
+  downY = e.clientY;
+  downT = performance.now();
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
 });
@@ -129,10 +133,36 @@ const endDrag = (e) => {
     canvas.releasePointerCapture(e.pointerId);
   }
   canvas.style.cursor = "grab";
+  // a short, stationary press is a TAP — check if it landed on the pond
+  if (
+    e && e.clientX != null &&
+    Math.hypot(e.clientX - downX, e.clientY - downY) < 7 &&
+    performance.now() - downT < 450
+  ) {
+    tryPondTap(e);
+  }
 };
 canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
+
+// Tap the pond to scoop water (game mode's water resource). Raycast the tap
+// through the ortho camera against the pond surface only.
+const _pondRay = new THREE.Raycaster();
+const _pondNdc = new THREE.Vector2();
+function tryPondTap(e) {
+  if (!currentMode.collectWater) return; // only the game collects water
+  const r = canvas.getBoundingClientRect();
+  _pondNdc.set(
+    ((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1,
+  );
+  _pondRay.setFromCamera(_pondNdc, pixel.camera);
+  if (_pondRay.intersectObject(world.water.mesh, false).length) {
+    // scoop animation first; the charge lands when the can reaches the button
+    playScoop(e.clientX, e.clientY, () => currentMode.collectWater?.());
+  }
+}
 
 // Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
 // visible world height; resize() re-derives the frustum + render targets.
