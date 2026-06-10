@@ -23,7 +23,13 @@ export class PixelCamera {
     // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
     // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
     // while dragging — it settles once the yaw stops changing.
-    this.baseEyeOffset = new THREE.Vector3(13, 4.3, 13); // low eye, just enough angle that the ground fills the lower frame
+    // Eye height matters more than it looks: orthographic rays are parallel, so
+    // every screen row's ray ORIGINATES at eye height minus its screen offset.
+    // With a low eye, the bottom rows of a tall (portrait) canvas start BELOW
+    // the ground plane and can never hit it — the frame bottom turns into an
+    // empty band. At y=8 every row of a viewHeight-20 frame starts above the
+    // ground, so the meadow truly fills the whole screen on any aspect.
+    this.baseEyeOffset = new THREE.Vector3(13, 8.0, 13);
     this.eyeOffset = this.baseEyeOffset.clone();
     this.yaw = 0;
     this._yAxis = new THREE.Vector3(0, 1, 0);

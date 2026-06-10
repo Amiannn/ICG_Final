@@ -480,7 +480,10 @@ function strikePose(a, dt) {
 // start as a final guarantee).
 const STAGE_DOWN = { x: 0.998, z: -0.065 };   // toward the camera (screen-down)
 const STAGE_RIGHT = { x: -0.0645, z: -0.998 }; // along the screen to the right
-const STAGE_BASE = { x: 1.8 + STAGE_DOWN.x * 15.0, z: 1.0 + STAGE_DOWN.z * 15.0 };
+// (distance re-derived for the raised 8.0-high eye: depth compression is now
+// ~0.40 screen-units per ground unit, so 13.5 units forward sits just above
+// the HUD at the festival's pulled-back framing)
+const STAGE_BASE = { x: 1.8 + STAGE_DOWN.x * 13.5, z: 1.0 + STAGE_DOWN.z * 13.5 };
 const FRONT_FACE = Math.atan2(-STAGE_DOWN.z, STAGE_DOWN.x); // face the camera
 const FRONT_SLOTS = [-5.0, -2.5, 0, 2.5, 5.0].map((s) => ({
   x: STAGE_BASE.x + s * STAGE_RIGHT.x,
@@ -573,9 +576,12 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   }
 
   // lead a visitor to the campfire; it vanishes there (… into bone meal).
+  // A*-routed like every other walk (the campfire itself is an obstacle, so
+  // the route's endpoint snaps to the nearest free spot at its rim).
   function sendToFire(a, fx, fz) {
     a.state = "tofire";
     a.fire = [fx, fz];
+    planTo(a, fx, fz);
   }
 
   // tap pick-up: returns the dropping's world spot (and clears it) or null
@@ -598,6 +604,43 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   let party = false;
   let posing = false; // the end pose has been called — late arrivals join it
 
+  // ---- universal A* travel: EVERY walk is a planned route -------------------
+  // Visits, exits, the march to the campfire and the festival sprint all use
+  // the same machinery: plan against an obstacle list (the full list for
+  // everyday strolls, MAJOR for the festival sprint), follow it waypoint by
+  // waypoint, and re-plan in place if progress ever stalls — so no animal can
+  // be caught on a rock, a hillside, the pavilion, the pond or the campfire.
+  function planTo(a, tx, tz, list = OBSTACLES) {
+    a.goal = { x: tx, z: tz };
+    a.routeList = list;
+    a.route = findPath(a.group.position.x, a.group.position.z, tx, tz, list) || [a.goal];
+    a.wp = 0;
+    a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
+  }
+
+  // follow the current route; returns true when the FINAL goal is reached
+  function followRoute(a, dt, t, hustle = 1) {
+    const list = a.routeList || OBSTACLES;
+    const route = a.route || [a.goal];
+    const wp = route[Math.min(a.wp || 0, route.length - 1)];
+    const lastLeg = (a.wp || 0) >= route.length - 1;
+    if (walk(a, wp.x, wp.z, dt, t, hustle, list)) {
+      if (lastLeg) return true;
+      a.wp++;
+    }
+    // watchdog: no real progress for ~1.2s (shoved by a neighbour, wedged on a
+    // rim, anything) → re-plan from where it stands; it can always route out
+    a.stuckT += dt;
+    if (a.stuckT > 1.2) {
+      if (Math.hypot(a.group.position.x - a.lastPX, a.group.position.z - a.lastPZ) < 0.25) {
+        a.route = findPath(a.group.position.x, a.group.position.z, a.goal.x, a.goal.z, list) || [a.goal];
+        a.wp = 0;
+      }
+      a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
+    }
+    return false;
+  }
+
   // Festival! Every animal gathers to the front row and breakdances. Overrides
   // the normal visit logic until turned off (then they disperse off-screen).
   function setParty(on) {
@@ -612,11 +655,8 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
         a.state = "gather";
         a.group.visible = true;
         a.group.scale.setScalar(a.baseScale * 1.3); // stand out for the show
-        // A* route to the stage (guaranteed clear of every major obstacle);
-        // fall back to a straight line if routing ever fails
-        a.route = findPath(a.group.position.x, a.group.position.z, sx, sz, MAJOR) || [{ x: sx, z: sz }];
-        a.wp = 0;
-        a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
+        // A* route to the stage (guaranteed clear of every major obstacle)
+        planTo(a, sx, sz, MAJOR);
         // sprint pace sized so EVERYONE reaches the stage in ~4s, however far
         // they start (and whatever the frame rate manages)
         const d = Math.hypot(sx - a.group.position.x, sz - a.group.position.z);
@@ -630,7 +670,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
         a.state = "leave";
         // disperse past the camera through the GAP between the mid-distance
         // hills at (27,-5) and (26,15) — off the bottom edge, never up a slope
-        a.path = { exit: [23, Math.max(1.5, Math.min(8, a.group.position.z))] };
+        planTo(a, 23, Math.max(1.5, Math.min(8, a.group.position.z)));
       });
     }
   }
@@ -666,6 +706,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
       const [ex, ez] = resolveXZ(path.enter[0], path.enter[1]); // never spawn inside anything
       a.group.position.set(ex, 0, ez);
       a.group.visible = true;
+      planTo(a, path.graze[0], path.graze[1]); // A* in — around every rock/hill
       a.heading = Math.atan2(-(path.graze[1] - path.enter[1]), path.graze[0] - path.enter[0]);
       a.group.rotation.y = a.heading;
       api.onVisit?.(a.type); // let the game toast + journal the arrival
@@ -687,26 +728,10 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           strikePose(a, dt);
         } else if (a.state === "dance") {
           dance(a, t, dt);
-        } else {
-          // follow the A* route waypoint by waypoint (each leg is provably clear)
-          const route = a.route || [a.slot];
-          const wp = route[Math.min(a.wp || 0, route.length - 1)];
-          const lastLeg = (a.wp || 0) >= route.length - 1;
-          if (walk(a, wp.x, wp.z, dt, t, a.hustle || 3.2, MAJOR)) {
-            if (lastLeg) { a.state = posing ? "pose" : "dance"; a.heading = FRONT_FACE; }
-            else a.wp++;
-          }
-          // watchdog: if a dancer makes no real progress for ~1.2s (pushed by a
-          // neighbour, wedged on a rim, anything), RE-PLAN from where it stands —
-          // it can always route out, so nobody ever misses the show
-          a.stuckT += dt;
-          if (a.stuckT > 1.2) {
-            if (Math.hypot(a.group.position.x - a.lastPX, a.group.position.z - a.lastPZ) < 0.25) {
-              a.route = findPath(a.group.position.x, a.group.position.z, a.slot.x, a.slot.z, MAJOR) || [{ x: a.slot.x, z: a.slot.z }];
-              a.wp = 0;
-            }
-            a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
-          }
+        } else if (followRoute(a, dt, t, a.hustle || 3.2)) {
+          // arrived on stage (late arrivals join the held pose directly)
+          a.state = posing ? "pose" : "dance";
+          a.heading = FRONT_FACE;
         }
       }
       // dancers are solid too: pairwise push-apart so they never overlap on the
@@ -741,10 +766,13 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
       if (a.state === "idle") { a.group.visible = false; continue; }
       // rain → seek shelter and walk off early (night is fine to stay;
       // a march to the fire is, alas, not interrupted by weather)
-      if (raining && a.state !== "leave" && a.state !== "tofire") a.state = "leave";
+      if (raining && a.state !== "leave" && a.state !== "tofire") {
+        a.state = "leave";
+        planTo(a, a.path.exit[0], a.path.exit[1]);
+      }
 
       if (a.state === "enter") {
-        if (walk(a, a.path.graze[0], a.path.graze[1], dt, t)) {
+        if (followRoute(a, dt, t)) {
           a.state = "graze";
           a.grazeT = rand(GRAZE_DAY_MIN, GRAZE_DAY_MAX) * game.dayLengthSeconds;
           a.poopT = a.grazeT * rand(0.25, 0.7); // it'll happen sometime mid-graze
@@ -759,15 +787,18 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
             api.onPoop?.(a.type);
           }
         }
-        if (a.grazeT <= 0) a.state = "leave";
+        if (a.grazeT <= 0) {
+          a.state = "leave";
+          planTo(a, a.path.exit[0], a.path.exit[1]);
+        }
       } else if (a.state === "leave") {
-        if (walk(a, a.path.exit[0], a.path.exit[1], dt, t)) {
+        if (followRoute(a, dt, t)) {
           a.state = "idle";
           a.group.visible = false;
         }
       } else if (a.state === "tofire") {
         // marching to the campfire (rain doesn't save it now)
-        if (walk(a, a.fire[0], a.fire[1], dt, t)) {
+        if (followRoute(a, dt, t)) {
           a.state = "roast";
           a.roastT = 0;
           api.onRoastStart?.(a.type); // fire flares (ember burst)

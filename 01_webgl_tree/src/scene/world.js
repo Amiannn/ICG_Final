@@ -90,10 +90,24 @@ export function buildWorld(scene) {
   // An inward-facing cylinder of fog-shaded meadow green catches those rays,
   // so the bottom of the frame reads as the land falling away into the mist
   // (and it surrounds the scene, so it works at every orbit angle).
-  const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(34, 34, 60, 28, 1, true),
-    toonMaterial(0x6f8a52),
-  );
+  // Vertex-coloured: meadow green at the rim fading to a misty blue-grey below,
+  // so any sliver that does show (extreme zoom-out) reads as land falling away
+  // into haze rather than a flat slab.
+  const skirtGeo = new THREE.CylinderGeometry(34, 34, 60, 28, 8, true);
+  {
+    const pos = skirtGeo.attributes.position;
+    const cols = new Float32Array(pos.count * 3);
+    const top = new THREE.Color(0x6f8a52);
+    const deep = new THREE.Color(0x8a98a8);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const f = Math.min(1, Math.max(0, -pos.getY(i) / 18)); // 0 at rim → 1 by 18u down
+      c.copy(top).lerp(deep, Math.pow(f, 0.65));
+      cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+    }
+    skirtGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+  }
+  const skirt = new THREE.Mesh(skirtGeo, toonMaterial(0xffffff, { vertexColors: true }));
   skirt.material.side = THREE.BackSide;
   skirt.position.y = -30; // top edge meets the ground plane at y = 0
   skirt.userData.noReflect = true;

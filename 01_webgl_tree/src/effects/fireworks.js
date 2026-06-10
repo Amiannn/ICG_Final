@@ -143,9 +143,11 @@ export function makeFireworks() {
   }
 
   function launch() {
-    // burst JUST ABOVE the full-grown tree top (~20u), in the background sky
+    // burst just above the full-grown tree top (~20u), in the background sky
     // behind the tree (toward −x,−z) so it crowns the tree without covering it.
-    const apex = rand(22, 28);
+    // Apex kept low enough that the blooms stay inside the festival framing on
+    // tall (portrait) screens with the raised camera.
+    const apex = rand(17, 22);
     rockets.push({
       x: rand(-11, 3), y: 1.0, z: rand(-11, 3),
       vx: rand(-0.5, 0.5), vy: Math.sqrt(2 * G * (apex - 1.0)) * rand(0.97, 1.03), vz: rand(-0.5, 0.5),
