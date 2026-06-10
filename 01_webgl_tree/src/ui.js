@@ -26,6 +26,9 @@ export function initUI(onChange, onAction, onMode, onSpecies) {
   initTimeSlider(onChange);
   initActions(onAction);
   initSettingsPanel(onChange);
+
+  // demo shortcut in Settings: fast-forward the game to the full-grown tree
+  $("#skip-day30")?.addEventListener("click", () => onAction?.("skipday30"));
   initModeButtons(onMode);
   initSpeciesButtons(onSpecies);
   initNotify();
@@ -139,6 +142,9 @@ function initActions(onAction) {
   document.querySelectorAll(".action").forEach((btn) => {
     btn.addEventListener("click", () => {
       const name = btn.dataset.action;
+      // let the game veto first (e.g. out of water) — it shows its own toast
+      if (onAction?.(name) === false) return;
+
       btn.classList.remove("pulse");
       void btn.offsetWidth; // restart animation
       btn.classList.add("pulse");
@@ -146,9 +152,88 @@ function initActions(onAction) {
       const info = ACTION_INFO[name];
       logEvent(info.icon, info.text);
       showNotify(info.icon, info.text);
-      onAction?.(name);
     });
   });
+}
+
+// resource readouts on the action buttons (badge + greyed-out icon at 0)
+const _lastCount = {};
+function setResourceCount(action, badgeId, n) {
+  const el = $("#" + badgeId);
+  if (el) {
+    el.textContent = n;
+    if (_lastCount[action] != null && n > _lastCount[action]) {
+      el.classList.remove("bump");
+      void el.offsetWidth;
+      el.classList.add("bump");
+    }
+  }
+  _lastCount[action] = n;
+  const btn = document.querySelector(`.action[data-action="${action}"]`);
+  if (btn) btn.classList.toggle("empty", n <= 0);
+}
+export const setWaterCount = (n) => setResourceCount("water", "water-count", n);
+export const setFertCount = (n) => setResourceCount("fertilize", "fert-count", n);
+export const setBoneCount = (n) => setResourceCount("bonemeal", "bone-count", n);
+
+// Pond-scoop animation: the watering can pops up at the tap point, dips to
+// scoop (with a ripple ring), then flies to the Water button. `onDone` fires
+// when it lands — the moment to actually grant the charge.
+export function playScoop(clientX, clientY, onDone) {
+  const app = document.querySelector("#app");
+  const rect = app.getBoundingClientRect();
+  const wrap = document.createElement("div");
+  wrap.className = "scoop-anim";
+  wrap.style.left = `${clientX - rect.left}px`;
+  wrap.style.top = `${clientY - rect.top}px`;
+  wrap.innerHTML =
+    `<span class="scoop-ring"></span>` +
+    `<img class="scoop-can" src="./icons/icon_water.png" alt="" />`;
+  app.appendChild(wrap);
+
+  // after the dip, fly the can to the Water button's badge
+  const badge = $("#water-count");
+  const b = badge ? badge.getBoundingClientRect() : { left: clientX, top: clientY, width: 0, height: 0 };
+  const tx = b.left + b.width / 2 - clientX;
+  const ty = b.top + b.height / 2 - clientY;
+  setTimeout(() => {
+    const can = wrap.querySelector(".scoop-can");
+    can.style.transition = "transform 0.5s cubic-bezier(0.45, -0.15, 0.8, 0.6), opacity 0.5s ease";
+    can.style.transform = `translate(${tx}px, ${ty}px) scale(0.22)`;
+    can.style.opacity = "0.2";
+  }, 540);
+  setTimeout(() => {
+    wrap.remove();
+    onDone?.();
+  }, 1080);
+}
+
+// Dropping pick-up: a little 💩 pops up at the tap point and flies to the
+// Fertilize button; the charge lands with it.
+export function playPickup(clientX, clientY, onDone) {
+  const app = document.querySelector("#app");
+  const rect = app.getBoundingClientRect();
+  const wrap = document.createElement("div");
+  wrap.className = "scoop-anim";
+  wrap.style.left = `${clientX - rect.left}px`;
+  wrap.style.top = `${clientY - rect.top}px`;
+  wrap.innerHTML = `<span class="pickup-icon">💩</span>`;
+  app.appendChild(wrap);
+
+  const badge = $("#fert-count");
+  const b = badge ? badge.getBoundingClientRect() : { left: clientX, top: clientY, width: 0, height: 0 };
+  const tx = b.left + b.width / 2 - clientX;
+  const ty = b.top + b.height / 2 - clientY;
+  setTimeout(() => {
+    const ic = wrap.querySelector(".pickup-icon");
+    ic.style.transition = "transform 0.45s cubic-bezier(0.45, -0.15, 0.8, 0.6), opacity 0.45s ease";
+    ic.style.transform = `translate(${tx}px, ${ty}px) scale(0.3)`;
+    ic.style.opacity = "0.25";
+  }, 300);
+  setTimeout(() => {
+    wrap.remove();
+    onDone?.();
+  }, 800);
 }
 
 // ---- journal + notification pill ------------------------------------------

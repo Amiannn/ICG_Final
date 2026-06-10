@@ -33,11 +33,13 @@ export function makeAmbientMusic() {
 
   // called every frame with lighting.dayness (1 day … 0 night, lower in rain);
   // eases each track toward its share of the cross-fade so changes never pop.
-  function setDayness(d) {
+  // While it RAINS both tracks duck to silence — no crickets in a downpour,
+  // just the rain ambience itself.
+  function setDayness(d, rain = false) {
     if (!day) return;
     d = Math.max(0, Math.min(1, d));
-    const dayTarget = enabled ? baseVol * d : 0;
-    const nightTarget = enabled ? baseVol * (1 - d) : 0;
+    const dayTarget = enabled && !rain ? baseVol * d : 0;
+    const nightTarget = enabled && !rain ? baseVol * (1 - d) : 0;
     day.volume += (dayTarget - day.volume) * 0.04;
     night.volume += (nightTarget - night.volume) * 0.04;
 

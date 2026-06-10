@@ -6,9 +6,13 @@ import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
+import { makeWatering } from "./effects/watering.js";
+import { makeFertilizeBurst } from "./effects/fertilize.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
+import { makeFireworks } from "./effects/fireworks.js";
+import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
-import { initUI, tickFps } from "./ui.js";
+import { initUI, tickFps, playScoop, playPickup } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
 import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
@@ -36,6 +40,21 @@ const rainSound = makeRainSound();
 const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
+const watering = makeWatering();
+scene.add(watering.group); // droplets + local ground ripples
+const fertBurst = makeFertilizeBurst();
+scene.add(fertBurst.points); // rising nutrient motes on Fertilize
+const emberBurst = makeFertilizeBurst({ count: 130, color: 0xffac4f });
+scene.add(emberBurst.points); // campfire flare when a visitor is... rendered
+
+// Day-30 festival: fireworks + a pulsing point light that lights up the dancing
+// animals as each shell bursts (driven by game mode from the burst flash).
+const fireworks = makeFireworks();
+scene.add(fireworks.points);
+const festivalLight = new THREE.PointLight(0xffd9a0, 0, 60, 1.6);
+festivalLight.position.set(13, 13, 0); // high between the tree and the front-row stage
+festivalLight.visible = false;
+scene.add(festivalLight);
 
 // Audio can only start after a user gesture (browser autoplay policy), so kick
 // the ambient music off on the first interaction if it's enabled.
@@ -60,10 +79,23 @@ const ctx = {
   dust,
   rainSplash,
   rainSound,
+  fireworks,
+  festivalLight,
+  watering,
+  fertBurst,
+  emberBurst,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
+  activeTreeGroup: world.tree, // whichever tree the player can poke (game mode swaps it)
 };
+
+// touch interactions: tap the pond/tree, flick for a wind gust
+const interact = makeInteractions(ctx);
+ctx.interact = interact;
+scene.add(interact.leaves);
+window.__interact = interact; // dev hook (like __mode / __tod)
+window.__animals = () => world.animals?.debug?.(); // dev hook: dancer states
 
 // One place to switch rain on/off with all its effects (lighting overcast,
 // ambience, pond ripples, ground splash, screen streaks). Game weather + the
@@ -100,46 +132,93 @@ window.addEventListener("resize", resize);
 new ResizeObserver(resize).observe(canvas);
 resize();
 
-// Horizontal mouse-drag yaw. Click + drag left/right on the canvas to orbit
-// the camera around the cedar; vertical motion is intentionally ignored.
+// Pointer gestures on the canvas:
+//   • drag left/right — orbit (yaw) around the cedar (vertical motion ignored)
+//   • a tap           — poke the scene (pond ripple / tree shake), see interact.js
 canvas.style.cursor = "grab";
+const _tapRay = new THREE.Raycaster();
+const _tapNdc = new THREE.Vector2();
 let dragging = false;
 let lastX = 0;
+let lastY = 0;
+let moved = 0; // accumulated pointer travel (px) to tell taps from drags
 const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
+const TAP_SLOP_PX = 8;
+const TAP_MAX_MS = 350;
+let downT = 0;
 canvas.addEventListener("pointerdown", (e) => {
   dragging = true;
   lastX = e.clientX;
+  lastY = e.clientY;
+  downT = performance.now();
+  moved = 0;
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
 });
 canvas.addEventListener("pointermove", (e) => {
   if (!dragging) return;
   const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
   lastX = e.clientX;
+  lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(dy);
   pixel.setYaw(pixel.yaw - dx * YAW_SENSITIVITY);
 });
-const endDrag = (e) => {
+const endDrag = (e, mayTap = false) => {
   if (!dragging) return;
   dragging = false;
   if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
     canvas.releasePointerCapture(e.pointerId);
   }
   canvas.style.cursor = "grab";
+  if (mayTap && moved < TAP_SLOP_PX && performance.now() - downT < TAP_MAX_MS) {
+    const r = canvas.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
+
+    // droppings first — a small pick-up target beats the broad pond/tree tests
+    if (currentMode.collectFertilizer && world.animals?.collectDroppingAt) {
+      _tapRay.setFromCamera(_tapNdc.set(nx, ny), pixel.camera);
+      if (world.animals.collectDroppingAt(_tapRay.ray)) {
+        window.__lastTap = "poop";
+        playPickup(e.clientX, e.clientY, () => currentMode.collectFertilizer?.());
+        return;
+      }
+    }
+
+    // then visiting animals (night roast → bone meal; day taps just hint)
+    if (currentMode.tryRoast) {
+      _tapRay.setFromCamera(_tapNdc.set(nx, ny), pixel.camera);
+      if (currentMode.tryRoast(_tapRay.ray)) {
+        window.__lastTap = "animal";
+        return;
+      }
+    }
+
+    const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
+    window.__lastTap = hit; // dev hook
+    // tapping the pond also scoops a water charge (game mode): the can
+    // animation flies to the button, then the charge lands
+    if (hit === "water" && currentMode.collectWater) {
+      playScoop(e.clientX, e.clientY, () => currentMode.collectWater?.());
+    }
+  }
 };
-canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
-// Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
-// visible world height; resize() re-derives the frustum + render targets.
-const ZOOM_MIN = 14, ZOOM_MAX = 46;
+// Mouse-wheel zoom — a FACTOR multiplied onto the mode's base view height
+// (game mode's base follows the tree's growth: close on the sprout, pulled
+// back for the full cedar). The camera is orthographic, so zoom = scaling
+// the visible world height.
+const BASE_VIEW = 36; // modes without a viewBase() (realtime/growth/morph)
+let zoomFactor = 1;
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const factor = Math.exp(e.deltaY * 0.0012); // smooth exponential zoom
-    pixel.viewHeight = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pixel.viewHeight * factor));
-    resize();
+    zoomFactor = Math.min(2.2, Math.max(0.45, zoomFactor * Math.exp(e.deltaY * 0.0012)));
   },
   { passive: false },
 );
@@ -159,8 +238,20 @@ function render() {
 
   if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
 
+  // ease the zoom toward base × wheel factor (base grows with the tree)
+  const base = currentMode.viewBase ? currentMode.viewBase() : BASE_VIEW;
+  const want = Math.min(50, Math.max(12, base * zoomFactor));
+  if (Math.abs(want - pixel.viewHeight) > 0.005) {
+    pixel.viewHeight += (want - pixel.viewHeight) * Math.min(1, dt * 4);
+    resize();
+  }
+
   currentMode.render(ctx, time);
-  music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
+  watering.setTime(time); // animate the Water-action sprinkle burst
+  fertBurst.setTime(time); // animate the Fertilize nutrient motes
+  emberBurst.setTime(time); // animate the campfire roast flare
+  // day/night cross-fade; silent in rain (rain sound only) and under the festival show
+  music.setDayness(lighting.dayness, settings.rain || !!ctx.festivalActive);
   tickFps();
 }
 
@@ -214,6 +305,11 @@ function onSettingChange(key) {
 function onAction(name) {
   if (currentMode.action) currentMode.action(name);
 }
+
+// demo hotkey: F fast-forwards the game to Day 30 (same as Settings → Demo)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "f" || e.key === "F") onAction("skipday30");
+});
 
 // Tree species picked in Settings → the active mode (game).
 function onSpecies(name) {

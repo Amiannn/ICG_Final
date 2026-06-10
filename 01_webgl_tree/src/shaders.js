@@ -191,6 +191,7 @@ export const compositeFragment = /* glsl */ `
   uniform float uGrain;
   uniform float uNight;
   uniform float uVignette;
+  uniform vec3 uFlash;        // fireworks burst flash (warm screen glow)
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -242,8 +243,8 @@ export const compositeFragment = /* glsl */ `
     // fades smoothly through the cycle (1 = full night, 0 = day). Kept mild so the
     // bottom of the night reads as a moonlit blue, never a black-out.
     if (uNight > 0.001) {
-      vec3 cool = color * vec3(0.66, 0.72, 0.96);
-      color = mix(color, cool, 0.5 * clamp(uNight, 0.0, 1.0));
+      vec3 cool = color * vec3(0.74, 0.79, 0.98);
+      color = mix(color, cool, 0.38 * clamp(uNight, 0.0, 1.0));
     }
 
     // overcast grade when raining: greyer, cooler, a touch dimmer (no sunshine)
@@ -270,6 +271,10 @@ export const compositeFragment = /* glsl */ `
     // vignette
     float v = distance(vUv, vec2(0.5));
     color *= 1.0 - smoothstep(0.6, 1.0, v) * uVignette;
+
+    // fireworks burst flash — a warm screen-wide glow, stronger toward the sky
+    // (top of frame) where the shells bloom; pulses with each explosion.
+    color += uFlash * (0.7 + 0.6 * vUv.y);
 
     gl_FragColor = vec4(linearToSRGB(color), 1.0);
   }

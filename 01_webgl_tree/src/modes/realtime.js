@@ -26,9 +26,14 @@ export const realtimeMode = {
     cloudUniforms.uCloudTime.value = time * 0.015;
     cloudUniforms.uCloudStrength.value = settings.clouds ? 0.45 : 0;
 
-    // wind sways the grass + foliage across the whole scene (gustier in rain)
+    // wind sways the grass + foliage across the whole scene. Slow overlapping
+    // gusts roll through (so the meadow breathes — calm spells, then a wave),
+    // and the whole thing blows harder in the rain.
     windUniforms.uWindTime.value = time;
-    windUniforms.uWindStrength.value = settings.rain ? 0.2 : 0.11;
+    const gust = 0.8 + 0.35 * Math.sin(time * 0.21) + 0.2 * Math.sin(time * 0.047 + 1.7);
+    windUniforms.uWindStrength.value = (settings.rain ? 0.3 : 0.2) * gust;
+    // step the touch interactions (tree-shake wobble + falling leaves)
+    if (ctx.interact) ctx.interact.update(time);
 
     // time-of-day: an external driver (game mode's clock via ctx.tod) wins;
     // otherwise the built-in continuous cycle arcs the sun over ~30s.
@@ -48,6 +53,9 @@ export const realtimeMode = {
 
     world.water.setTime(time);
     world.water.material.uniforms.uReflectEnabled.value = settings.water ? 1 : 0;
+    // the pond darkens to moonlit blue after sunset (it gets no scene lighting);
+    // lighting.dayness tracks every time-of-day path (cycle, game clock, Night)
+    world.water.material.uniforms.uNight.value = 1 - lighting.dayness;
     dust.setTime(time);
     if (ctx.rainSplash) ctx.rainSplash.setTime(time); // animate rain-impact rings
 
@@ -73,12 +81,13 @@ export const realtimeMode = {
     const sunny = isDay && !settings.rain;
     if (world.animals) {
       world.animals.group.visible = true;
-      world.animals.update(time, sunny, reveal);
+      world.animals.update(time, sunny, settings.rain);
     }
     if (world.birds) {
       world.birds.group.visible = true;
       world.birds.update(time, sunny, reveal);
     }
+    if (world.butterflies) world.butterflies.update(time, sunny); // nectar rounds
 
     pipeline.render(ctx.scene, lighting.sun, time, (r, cam) => {
       world.water.updateReflection(r, cam, ctx.scene);

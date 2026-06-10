@@ -15,20 +15,28 @@ import * as THREE from "three";
 export class PixelCamera {
   constructor() {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
-    this.viewHeight = 30; // world units visible vertically (pulled back, but the ground still fills the lower frame)
-    this.target = new THREE.Vector3(1.8, 8.2, 1.0);
+    this.viewHeight = 20; // start at the sprout close-up; the game eases this out as the tree grows
+    // target height frames the scene high on the phone screen, so the pond in
+    // the foreground stays above (not behind) the bottom HUD cluster
+    this.target = new THREE.Vector3(1.8, 2.8, 1.0);
     // Iso offset from target to eye. baseEyeOffset is the fixed-Y rig; eyeOffset
     // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
     // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
     // while dragging — it settles once the yaw stops changing.
-    this.baseEyeOffset = new THREE.Vector3(13, 4.3, 13); // low eye, just enough angle that the ground fills the lower frame
+    // Eye height matters more than it looks: orthographic rays are parallel, so
+    // every screen row's ray ORIGINATES at eye height minus its screen offset.
+    // With a low eye, the bottom rows of a tall (portrait) canvas start BELOW
+    // the ground plane and can never hit it — the frame bottom turns into an
+    // empty band. At y=8 every row of a viewHeight-20 frame starts above the
+    // ground, so the meadow truly fills the whole screen on any aspect.
+    this.baseEyeOffset = new THREE.Vector3(13, 8.0, 13);
     this.eyeOffset = this.baseEyeOffset.clone();
     this.yaw = 0;
     this._yAxis = new THREE.Vector3(0, 1, 0);
     this.desiredTarget = this.target.clone();
     this.desiredPosition = this.target.clone().add(this.eyeOffset);
     // default framing: yawed so the pond sits at the lower-left of the tree
-    this.setYaw(0.85);
+    this.setYaw(0.0);
 
     this.snapEnabled = true;
     this.resolutionY = 270;
@@ -62,7 +70,7 @@ export class PixelCamera {
     // viewing angle stays locked (pure translation, which snaps cleanly).
     this.desiredTarget.set(
       1.8 + Math.sin(time * 0.16) * 1.5,
-      8.2,
+      2.8,
       1.0 + Math.cos(time * 0.12) * 1.2,
     );
     this.desiredPosition.copy(this.desiredTarget).add(this.eyeOffset);
