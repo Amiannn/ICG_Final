@@ -2,7 +2,7 @@ import { realtimeMode } from "./realtime.js";
 import { makeMorphTree } from "../../../02_tree_growth/src/morph_tree.js";
 import { makeCedarGrowth } from "../../../02_tree_growth/src/cedar_growth.js";
 import { game } from "../config.js";
-import { setDay, reflectTime, notifyEvent, setWaterCount, setFertCount } from "../ui.js";
+import { setDay, reflectTime, notifyEvent, setWaterCount, setFertCount, setBoneCount } from "../ui.js";
 
 // Game mode — the "Pixel Bonsai" experience.
 //
@@ -127,6 +127,21 @@ export const gameMode = {
     // fertiliser too: collect animal droppings to restock
     this.fert = 1;
     setFertCount(this.fert);
+    // bone meal: tap a visitor at night to lead it to the campfire… (+1)
+    this.bone = 1;
+    setBoneCount(this.bone);
+    if (ctx.world.animals) {
+      ctx.world.animals.onRoastStart = () => {
+        // the fire flares as the visitor keels over beside it
+        const fire = ctx.world.campfire?.group.position || { x: 0.6, z: 4.4 };
+        ctx.emberBurst?.trigger(fire, 2.4, 0.8);
+      };
+      ctx.world.animals.onRoasted = () => {
+        this.bone += 1;
+        setBoneCount(this.bone);
+        notifyEvent("🦴", "Bone meal collected! (+1)");
+      };
+    }
 
     setDay(game.startDay);
     this._apply(ctx);
@@ -284,8 +299,20 @@ export const gameMode = {
       }
       this.fert -= 1;
       setFertCount(this.fert);
+      // nutrient motes rise around the trunk, scaled to the tree's size
+      const dayIndex = game.startDay - 1 + this.dayFloat;
+      const g = Math.min(1, Math.max(0, dayIndex / (game.growthDays - 1)));
+      this.ctx.fertBurst?.trigger(this.ctx.tree?.position, 2.2 + 10 * g, 1.0 + 1.6 * g);
       this.dayFloat += 1;
-    } else if (name === "bonemeal") this.dayFloat += 2;
+    } else if (name === "bonemeal") {
+      if (this.bone <= 0) {
+        notifyEvent("🌙", "No bone meal — lead a visitor to the campfire at night!");
+        return false;
+      }
+      this.bone -= 1;
+      setBoneCount(this.bone);
+      this.dayFloat += 2;
+    }
     else if (name === "skipday30") {
       // demo shortcut: jump straight to the fully-grown tree (mid-morning)
       const target = game.growthDays - game.startDay + 0.45;
@@ -308,6 +335,28 @@ export const gameMode = {
     this.fert += 1;
     setFertCount(this.fert);
     notifyEvent("💩", "Droppings collected — +1 fertilizer!");
+  },
+
+  // tap a visiting animal: at night it is led to the campfire and rendered
+  // (cartoon-style) into bone meal; by day you get a gentle hint instead.
+  tryRoast(ray) {
+    const animals = this.ctx.world.animals;
+    if (!animals?.animalAt) return false;
+    const a = animals.animalAt(ray);
+    if (!a) return false;
+    const isNight = this.ctx.lighting.dayness < 0.45;
+    if (!isNight) {
+      notifyEvent("🌙", "Wait for nightfall, when the campfire burns…");
+      return true; // tap handled (don't fall through and shake the tree)
+    }
+    if (this.ctx.settings.rain) {
+      notifyEvent("🌧️", "The fire is doused — no roasting in the rain.");
+      return true;
+    }
+    const fire = this.ctx.world.campfire?.group.position || { x: 0.6, z: 4.4 };
+    animals.sendToFire(a, fire.x + 0.4, fire.z - 0.3);
+    notifyEvent("🔥", `The ${a.type} wanders toward the warm fire…`);
+    return true;
   },
 
   // fixed close-up framing (the camera does NOT pull back as the tree grows —
@@ -390,7 +439,12 @@ export const gameMode = {
     if (ctx.pipeline.composite.uniforms.uFlash) ctx.pipeline.composite.uniforms.uFlash.value.setRGB(0, 0, 0);
     delete window.__festival;
     delete window.__gameDay;
-    if (ctx.world.animals) ctx.world.animals.onVisit = null;
+    if (ctx.world.animals) {
+      ctx.world.animals.onVisit = null;
+      ctx.world.animals.onPoop = null;
+      ctx.world.animals.onRoastStart = null;
+      ctx.world.animals.onRoasted = null;
+    }
     if (this.lastRain) ctx.setRain?.(false);
     ctx.tod = null;
     ctx.growthReveal = null;

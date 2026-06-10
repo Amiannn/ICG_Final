@@ -97,6 +97,7 @@ const BUILDERS = { cow: makeCow, sheep: makeSheep, dog: makeDog };
 
 const TURN_RATE = 3.0;     // max heading change (rad/s) → no snap-turns
 const rand = (a, b) => a + Math.random() * (b - a);
+const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // solid obstacles (set by makeAnimals): the tree, rocks, campfire — circles
@@ -498,13 +499,14 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
     group.add(a.group);
     const tr = TRAITS[type];
     anims.push({
-      ...a, type, baseScale: sc,
+      ...a, type, sc, baseScale: sc,
       spd: tr.spd, stride: tr.stride, strideAmp: tr.amp,
       phase: i * 1.7,
-      state: "idle",    // idle → enter → graze → leave → idle
+      state: "idle",    // idle → enter → graze → leave → idle (or → tofire → roast)
       path: null,
       grazeT: 0,
       poopT: 0, // countdown to leaving a dropping mid-graze
+      roastT: 0,
       heading: 0,
       dodge: 1,         // wall-follow side while skirting an obstacle
       dodgeT: 0,        // commitment time left on that side
@@ -555,6 +557,25 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
     slot.mesh.position.set(bx, 0, bz);
     slot.mesh.rotation.y = Math.random() * Math.PI * 2;
     slot.mesh.visible = true;
+  }
+
+  // tap test: returns the visiting animal the pick ray touches, or null
+  const _body = new THREE.Vector3();
+  function animalAt(ray) {
+    for (const a of anims) {
+      if (a.state !== "enter" && a.state !== "graze") continue;
+      const s = a.group.scale.x;
+      _body.copy(a.group.position);
+      _body.y += 0.55 * s; // aim at the body, not the feet
+      if (ray.distanceSqToPoint(_body) < (1.1 * s) ** 2) return a;
+    }
+    return null;
+  }
+
+  // lead a visitor to the campfire; it vanishes there (… into bone meal).
+  function sendToFire(a, fx, fz) {
+    a.state = "tofire";
+    a.fire = [fx, fz];
   }
 
   // tap pick-up: returns the dropping's world spot (and clears it) or null
@@ -718,8 +739,9 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
 
     for (const a of anims) {
       if (a.state === "idle") { a.group.visible = false; continue; }
-      // rain → seek shelter and walk off early (night is fine to stay)
-      if (raining && a.state !== "leave") a.state = "leave";
+      // rain → seek shelter and walk off early (night is fine to stay;
+      // a march to the fire is, alas, not interrupted by weather)
+      if (raining && a.state !== "leave" && a.state !== "tofire") a.state = "leave";
 
       if (a.state === "enter") {
         if (walk(a, a.path.graze[0], a.path.graze[1], dt, t)) {
@@ -743,16 +765,47 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           a.state = "idle";
           a.group.visible = false;
         }
+      } else if (a.state === "tofire") {
+        // marching to the campfire (rain doesn't save it now)
+        if (walk(a, a.fire[0], a.fire[1], dt, t)) {
+          a.state = "roast";
+          a.roastT = 0;
+          api.onRoastStart?.(a.type); // fire flares (ember burst)
+        }
+      } else if (a.state === "roast") {
+        // cartoon send-off: keel over with a little hop, then shrink away
+        a.roastT += dt;
+        const TIP = 0.55, GONE = 1.6;
+        if (a.roastT < TIP) {
+          const k = _ss(0, 1, a.roastT / TIP);
+          a.group.rotation.z = k * 1.35; // falls onto its side
+          a.group.position.y = Math.sin(k * Math.PI) * 0.22; // the hop
+          for (const hip of a.legs) hip.rotation.x *= 0.8; // legs go limp
+        } else {
+          a.group.rotation.z = 1.35;
+          const k = Math.min(1, (a.roastT - TIP) / (GONE - TIP));
+          a.group.scale.setScalar(a.sc * (1 - _ss(0, 1, k))); // burns down
+          a.group.position.y = -0.08 * k;
+          if (k >= 1) {
+            a.state = "idle";
+            a.group.visible = false;
+            a.group.rotation.z = 0;
+            a.group.scale.setScalar(a.sc); // restored for its next life
+            api.onRoasted?.(a.type);
+          }
+        }
       }
     }
   }
 
-  // onVisit(type) / onPoop(type) are assignable by the game for toasts;
-  // collectDroppingAt(ray) is the tap pick-up test (→ fertiliser);
+  // onVisit / onPoop / onRoasted are assignable by the game for toasts;
+  // collectDroppingAt(ray) picks up droppings (→ fertiliser), animalAt(ray) +
+  // sendToFire(a,…) drive the night-time bone-meal "harvest";
   // party/setBeat/endPose drive the Day-30 festival dance show.
   const api = {
     group, update, party: setParty, setBeat, endPose,
-    onVisit: null, onPoop: null, collectDroppingAt,
+    onVisit: null, onPoop: null, onRoastStart: null, onRoasted: null,
+    collectDroppingAt, animalAt, sendToFire,
   };
   api.debug = () => anims.map((a) => ({
     type: a.type, state: a.state,

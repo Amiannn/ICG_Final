@@ -7,6 +7,7 @@ import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
+import { makeFertilizeBurst } from "./effects/fertilize.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeFireworks } from "./effects/fireworks.js";
 import { makeInteractions } from "./effects/interact.js";
@@ -41,6 +42,10 @@ const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
 const watering = makeWatering();
 scene.add(watering.group); // droplets + local ground ripples
+const fertBurst = makeFertilizeBurst();
+scene.add(fertBurst.points); // rising nutrient motes on Fertilize
+const emberBurst = makeFertilizeBurst({ count: 130, color: 0xffac4f });
+scene.add(emberBurst.points); // campfire flare when a visitor is... rendered
 
 // Day-30 festival: fireworks + a pulsing point light that lights up the dancing
 // animals as each shell bursts (driven by game mode from the burst flash).
@@ -77,6 +82,8 @@ const ctx = {
   fireworks,
   festivalLight,
   watering,
+  fertBurst,
+  emberBurst,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
@@ -179,6 +186,15 @@ const endDrag = (e, mayTap = false) => {
       }
     }
 
+    // then visiting animals (night roast → bone meal; day taps just hint)
+    if (currentMode.tryRoast) {
+      _tapRay.setFromCamera(_tapNdc.set(nx, ny), pixel.camera);
+      if (currentMode.tryRoast(_tapRay.ray)) {
+        window.__lastTap = "animal";
+        return;
+      }
+    }
+
     const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
     window.__lastTap = hit; // dev hook
     // tapping the pond also scoops a water charge (game mode): the can
@@ -232,6 +248,8 @@ function render() {
 
   currentMode.render(ctx, time);
   watering.setTime(time); // animate the Water-action sprinkle burst
+  fertBurst.setTime(time); // animate the Fertilize nutrient motes
+  emberBurst.setTime(time); // animate the campfire roast flare
   // day/night cross-fade; silent in rain (rain sound only) and under the festival show
   music.setDayness(lighting.dayness, settings.rain || !!ctx.festivalActive);
   tickFps();

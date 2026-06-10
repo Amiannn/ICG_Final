@@ -26,9 +26,12 @@ export const realtimeMode = {
     cloudUniforms.uCloudTime.value = time * 0.015;
     cloudUniforms.uCloudStrength.value = settings.clouds ? 0.45 : 0;
 
-    // wind sways the grass + foliage across the whole scene (gustier in rain)
+    // wind sways the grass + foliage across the whole scene. Slow overlapping
+    // gusts roll through (so the meadow breathes — calm spells, then a wave),
+    // and the whole thing blows harder in the rain.
     windUniforms.uWindTime.value = time;
-    windUniforms.uWindStrength.value = settings.rain ? 0.2 : 0.11;
+    const gust = 0.8 + 0.35 * Math.sin(time * 0.21) + 0.2 * Math.sin(time * 0.047 + 1.7);
+    windUniforms.uWindStrength.value = (settings.rain ? 0.3 : 0.2) * gust;
     // step the touch interactions (tree-shake wobble + falling leaves)
     if (ctx.interact) ctx.interact.update(time);
 
