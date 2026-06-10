@@ -478,6 +478,21 @@ body {
 .count-badge.bump {
   animation: badgeBump 0.35s ease;
 }
+.pickup-icon {
+  position: absolute;
+  left: -16px;
+  top: -20px;
+  display: block;
+  font-size: 30px;
+  line-height: 1;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
+  animation: pickupPop 0.32s ease;
+}
+@keyframes pickupPop {
+  0% { transform: translateY(6px) scale(0.4); opacity: 0; }
+  60% { transform: translateY(-6px) scale(1.15); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
 @keyframes badgeBump {
   0% { transform: scale(1); }
   45% { transform: scale(1.45); }

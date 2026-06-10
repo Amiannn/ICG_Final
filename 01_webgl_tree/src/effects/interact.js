@@ -66,12 +66,12 @@ export function makeInteractions(ctx) {
     return { p, h, r: Math.min(3.8, Math.max(1.0, h * 0.27)) };
   }
 
-  function burstLeaves(metrics, time) {
+  function spawnLeaves(metrics, time, count) {
     // a young tree is still bare twigs — nothing to shed until the canopy
     // has actually budded in; after that, more foliage = more loose leaves
     const grown = ctx.growthReveal == null ? 1 : ctx.growthReveal;
     if (grown < 0.3) return;
-    let want = Math.round(16 * grown);
+    let want = Math.max(1, Math.round(count * grown));
     for (const leaf of pool) {
       if (want <= 0) break;
       if (leaf.on) continue;
@@ -129,7 +129,7 @@ export function makeInteractions(ctx) {
         shakeStart = time;
         const a = Math.random() * Math.PI * 2;
         shakeAxis.set(Math.cos(a), Math.sin(a));
-        burstLeaves(m, time);
+        spawnLeaves(m, time, 16);
         return "tree";
       }
     }
@@ -138,9 +138,21 @@ export function makeInteractions(ctx) {
 
   // ---- per-frame -----------------------------------------------------------
   let lastT = null;
+  let breezeT = 3 + Math.random() * 4; // until the next breeze-loosened leaf
   function update(time) {
     const dt = lastT == null ? 0 : Math.min(0.05, Math.max(0, time - lastT));
     lastT = time;
+
+    // ambient breeze: every few seconds a leaf or two drifts off the canopy
+    // on its own (windier weather sheds a touch more often)
+    breezeT -= dt * (windUniforms.uWindStrength.value > 0.15 ? 1.6 : 1);
+    if (breezeT <= 0) {
+      breezeT = 2.5 + Math.random() * 5;
+      const tree = ctx.activeTreeGroup || ctx.tree;
+      if (tree && tree.visible) {
+        spawnLeaves(treeMetrics(tree), time, Math.random() < 0.35 ? 2 : 1);
+      }
+    }
 
     // shaken tree: a quick damped wobble around its base
     if (shaken) {

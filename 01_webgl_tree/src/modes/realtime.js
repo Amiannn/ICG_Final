@@ -78,7 +78,7 @@ export const realtimeMode = {
     const sunny = isDay && !settings.rain;
     if (world.animals) {
       world.animals.group.visible = true;
-      world.animals.update(time, sunny, reveal);
+      world.animals.update(time, sunny, settings.rain);
     }
     if (world.birds) {
       world.birds.group.visible = true;

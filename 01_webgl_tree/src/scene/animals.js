@@ -246,23 +246,24 @@ const TRAITS = {
 };
 
 // A few meadow routes: walk in from off-screen → graze spot → walk back out.
-// Graze spots sit right beside the tree (trunk at 2.6,1.2 — kept ~2-3 units
-// clear of it), while still avoiding the pond and the campfire.
+// Graze spots hug the tree (trunk at 2.6,1.2 — about 1.8-2 units out, just
+// beyond the root spread), while avoiding the pond and the campfire.
 // (enter/exit points are picked OFF the hill footprints — visitors come around
 // the slopes through the gaps, never out of a hillside)
 const PATHS = [
-  { enter: [-13, 3], graze: [0.4, 2.2], exit: [-13, -1] },
-  { enter: [-14, -4], graze: [0.2, -0.8], exit: [-15, -3] },
-  { enter: [3, -11], graze: [3.2, -1.6], exit: [6, -13] },
-  { enter: [13, -7], graze: [4.8, -1.2], exit: [14, -9] },
-  { enter: [-12, 7], graze: [-0.6, 0.6], exit: [-13, 9] },
-  { enter: [-7, 10], graze: [-0.2, 3.0], exit: [-11, 12] },
+  { enter: [-13, 3], graze: [1.1, 2.0], exit: [-13, -1] },
+  { enter: [-14, -4], graze: [1.4, -0.2], exit: [-15, -3] },
+  { enter: [3, -11], graze: [3.0, -0.6], exit: [6, -13] },
+  { enter: [13, -7], graze: [4.0, -0.2], exit: [14, -9] },
+  { enter: [-12, 7], graze: [0.9, 0.5], exit: [-13, 9] },
+  { enter: [-7, 10], graze: [1.2, 2.6], exit: [-11, 12] },
 ];
 
 // Visit pacing (in seconds of clear-weather daytime).
 const GAP_MIN = 8, GAP_MAX = 26;   // wait between visits
-// visitors settle in for about half an in-game day before wandering off
-const GRAZE_DAY_MIN = 0.45, GRAZE_DAY_MAX = 0.65; // fraction of a day
+// visitors settle in for roughly a morning (or an evening — they're happy to
+// stay through the night) before wandering off
+const GRAZE_DAY_MIN = 0.35, GRAZE_DAY_MAX = 0.55; // fraction of a day
 
 // Walk the animal toward (tx,tz); animate trot + heading. Returns true on
 // arrival. `hustle` scales the pace (the festival gather is a sprint).
@@ -503,12 +504,73 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
       state: "idle",    // idle → enter → graze → leave → idle
       path: null,
       grazeT: 0,
+      poopT: 0, // countdown to leaving a dropping mid-graze
       heading: 0,
       dodge: 1,         // wall-follow side while skirting an obstacle
       dodgeT: 0,        // commitment time left on that side
     });
   });
   group.userData.noReflect = true; // keep barnyard out of the small pond mirror
+
+  // ---- droppings: visitors leave one mid-graze; tap to collect (fertiliser).
+  // A small recycled pool of dark lumps lying on the grass.
+  const POOP_POOL = 8;
+  const poopMat = toonMaterial(0x5c4630);
+  const poops = [];
+  for (let i = 0; i < POOP_POOL; i++) {
+    // the classic soft-serve swirl: squashed tiers tapering upward, each one
+    // nudged a little sideways so the stack curls, topped with a bent tip
+    const lump = new THREE.Group();
+    const TIERS = [
+      [0.21, 0.06, 0, 0],
+      [0.165, 0.155, 0.035, 0.02],
+      [0.115, 0.235, 0.06, 0.045],
+    ];
+    for (const [r, y, ox, oz] of TIERS) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 7, 5), poopMat);
+      m.position.set(ox, y, oz);
+      m.scale.y = 0.58; // squashed rings
+      m.castShadow = true;
+      m.receiveShadow = true;
+      lump.add(m);
+    }
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.14, 6), poopMat);
+    tip.position.set(0.1, 0.315, 0.075);
+    tip.rotation.z = -0.55; // the little curl leaning off the top
+    tip.castShadow = true;
+    lump.add(tip);
+    lump.scale.setScalar(1.55); // big enough to read above the grass tufts
+    lump.visible = false;
+    group.add(lump);
+    poops.push({ on: false, mesh: lump });
+  }
+
+  function dropPoop(a) {
+    // reuse a free slot, else recycle the oldest
+    const slot = poops.find((p) => !p.on) || poops[0];
+    slot.on = true;
+    // a little behind the animal, so it reads as left there while grazing
+    const bx = a.group.position.x - Math.cos(a.heading) * 0.6;
+    const bz = a.group.position.z + Math.sin(a.heading) * 0.6;
+    slot.mesh.position.set(bx, 0, bz);
+    slot.mesh.rotation.y = Math.random() * Math.PI * 2;
+    slot.mesh.visible = true;
+  }
+
+  // tap pick-up: returns the dropping's world spot (and clears it) or null
+  const _spot = new THREE.Vector3();
+  function collectDroppingAt(ray, radius = 0.9) {
+    for (const p of poops) {
+      if (!p.on) continue;
+      _spot.set(p.mesh.position.x, 0.18, p.mesh.position.z);
+      if (ray.distanceSqToPoint(_spot) < radius * radius) {
+        p.on = false;
+        p.mesh.visible = false;
+        return { x: p.mesh.position.x, z: p.mesh.position.z };
+      }
+    }
+    return null;
+  }
 
   let lastT = null;
   let gap = rand(2, 6); // first visitor wanders in a few seconds after load
@@ -589,10 +651,9 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
     }
   }
 
-  // active = clear daylight; visitors only arrive while it's true, and head out
-  // early if it turns to night or rain. (frac is unused now — visits aren't
-  // gated by tree growth.)
-  function update(t, active = true) {
+  // canArrive = clear daylight (new visitors only show up then); raining cuts
+  // a visit short — but nightfall does NOT: an evening guest stays the night.
+  function update(t, canArrive = true, raining = false) {
     const dt = lastT == null ? 0 : Math.min(0.08, Math.max(0, t - lastT));
     lastT = t;
 
@@ -647,7 +708,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
       return;
     }
 
-    if (active) {
+    if (canArrive) {
       gap -= dt;
       if (gap <= 0) {
         startVisit();
@@ -657,17 +718,25 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
 
     for (const a of anims) {
       if (a.state === "idle") { a.group.visible = false; continue; }
-      // bad weather / nightfall → cut the visit short and walk off
-      if (!active && a.state !== "leave") a.state = "leave";
+      // rain → seek shelter and walk off early (night is fine to stay)
+      if (raining && a.state !== "leave") a.state = "leave";
 
       if (a.state === "enter") {
         if (walk(a, a.path.graze[0], a.path.graze[1], dt, t)) {
           a.state = "graze";
           a.grazeT = rand(GRAZE_DAY_MIN, GRAZE_DAY_MAX) * game.dayLengthSeconds;
+          a.poopT = a.grazeT * rand(0.25, 0.7); // it'll happen sometime mid-graze
         }
       } else if (a.state === "graze") {
         graze(a, t);
         a.grazeT -= dt;
+        if (a.poopT > 0) {
+          a.poopT -= dt;
+          if (a.poopT <= 0) {
+            dropPoop(a);
+            api.onPoop?.(a.type);
+          }
+        }
         if (a.grazeT <= 0) a.state = "leave";
       } else if (a.state === "leave") {
         if (walk(a, a.path.exit[0], a.path.exit[1], dt, t)) {
@@ -678,8 +747,13 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
     }
   }
 
-  // onVisit(type) is assignable by the game to be told when a visitor arrives
-  const api = { group, update, party: setParty, setBeat, endPose, onVisit: null };
+  // onVisit(type) / onPoop(type) are assignable by the game for toasts;
+  // collectDroppingAt(ray) is the tap pick-up test (→ fertiliser);
+  // party/setBeat/endPose drive the Day-30 festival dance show.
+  const api = {
+    group, update, party: setParty, setBeat, endPose,
+    onVisit: null, onPoop: null, collectDroppingAt,
+  };
   api.debug = () => anims.map((a) => ({
     type: a.type, state: a.state,
     x: +a.group.position.x.toFixed(1), z: +a.group.position.z.toFixed(1),

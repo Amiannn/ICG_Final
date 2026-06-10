@@ -15,7 +15,7 @@ import * as THREE from "three";
 export class PixelCamera {
   constructor() {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
-    this.viewHeight = 36; // world units visible vertically (fits the full cedar + pond above the HUD)
+    this.viewHeight = 20; // start at the sprout close-up; the game eases this out as the tree grows
     // target height frames the scene high on the phone screen, so the pond in
     // the foreground stays above (not behind) the bottom HUD cluster
     this.target = new THREE.Vector3(1.8, 2.8, 1.0);

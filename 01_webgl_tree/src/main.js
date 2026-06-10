@@ -11,7 +11,7 @@ import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeFireworks } from "./effects/fireworks.js";
 import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
-import { initUI, tickFps, playScoop } from "./ui.js";
+import { initUI, tickFps, playScoop, playPickup } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
 import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
@@ -129,6 +129,8 @@ resize();
 //   • drag left/right — orbit (yaw) around the cedar (vertical motion ignored)
 //   • a tap           — poke the scene (pond ripple / tree shake), see interact.js
 canvas.style.cursor = "grab";
+const _tapRay = new THREE.Raycaster();
+const _tapNdc = new THREE.Vector2();
 let dragging = false;
 let lastX = 0;
 let lastY = 0;
@@ -166,6 +168,17 @@ const endDrag = (e, mayTap = false) => {
     const r = canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
+
+    // droppings first — a small pick-up target beats the broad pond/tree tests
+    if (currentMode.collectFertilizer && world.animals?.collectDroppingAt) {
+      _tapRay.setFromCamera(_tapNdc.set(nx, ny), pixel.camera);
+      if (world.animals.collectDroppingAt(_tapRay.ray)) {
+        window.__lastTap = "poop";
+        playPickup(e.clientX, e.clientY, () => currentMode.collectFertilizer?.());
+        return;
+      }
+    }
+
     const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
     window.__lastTap = hit; // dev hook
     // tapping the pond also scoops a water charge (game mode): the can
@@ -179,16 +192,17 @@ canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
-// Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
-// visible world height; resize() re-derives the frustum + render targets.
-const ZOOM_MIN = 14, ZOOM_MAX = 46;
+// Mouse-wheel zoom — a FACTOR multiplied onto the mode's base view height
+// (game mode's base follows the tree's growth: close on the sprout, pulled
+// back for the full cedar). The camera is orthographic, so zoom = scaling
+// the visible world height.
+const BASE_VIEW = 36; // modes without a viewBase() (realtime/growth/morph)
+let zoomFactor = 1;
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const factor = Math.exp(e.deltaY * 0.0012); // smooth exponential zoom
-    pixel.viewHeight = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pixel.viewHeight * factor));
-    resize();
+    zoomFactor = Math.min(2.2, Math.max(0.45, zoomFactor * Math.exp(e.deltaY * 0.0012)));
   },
   { passive: false },
 );
@@ -207,6 +221,14 @@ function render() {
   prevTime = time;
 
   if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
+
+  // ease the zoom toward base × wheel factor (base grows with the tree)
+  const base = currentMode.viewBase ? currentMode.viewBase() : BASE_VIEW;
+  const want = Math.min(50, Math.max(12, base * zoomFactor));
+  if (Math.abs(want - pixel.viewHeight) > 0.005) {
+    pixel.viewHeight += (want - pixel.viewHeight) * Math.min(1, dt * 4);
+    resize();
+  }
 
   currentMode.render(ctx, time);
   watering.setTime(time); // animate the Water-action sprinkle burst
