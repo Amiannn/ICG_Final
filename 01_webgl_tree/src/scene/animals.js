@@ -129,6 +129,109 @@ function resolveXZ(x, z, list = OBSTACLES) {
   return [x, z];
 }
 
+// ---- A* router (the festival gather must NEVER strand a dancer) -----------
+// A coarse grid over the meadow; cells inside any obstacle are blocked. A* with
+// no corner-cutting finds a guaranteed route, then line-of-sight smoothing
+// reduces it to a few waypoints. Local steering only has to follow short,
+// provably-clear legs, so concave rock/hill/campfire pockets can't trap anyone.
+const NAV = { x0: -22, x1: 26, z0: -18, z1: 18, cell: 0.6 };
+
+function navBlocked(x, z, list) {
+  for (const o of list) {
+    const dx = x - o.x, dz = z - o.z;
+    if (o.rx) { if (Math.hypot(dx / (o.rx + 0.2), dz / (o.rz + 0.2)) < 1) return true; }
+    else if (Math.hypot(dx, dz) < o.r + 0.2) return true;
+  }
+  return false;
+}
+
+function findPath(sx, sz, tx, tz, list) {
+  const W = Math.round((NAV.x1 - NAV.x0) / NAV.cell);
+  const H = Math.round((NAV.z1 - NAV.z0) / NAV.cell);
+  const cellX = (i) => NAV.x0 + (i % W) * NAV.cell;
+  const cellZ = (i) => NAV.z0 + ((i / W) | 0) * NAV.cell;
+  const toIdx = (x, z) => {
+    const ix = Math.min(W - 1, Math.max(0, Math.round((x - NAV.x0) / NAV.cell)));
+    const iz = Math.min(H - 1, Math.max(0, Math.round((z - NAV.z0) / NAV.cell)));
+    return iz * W + ix;
+  };
+  const blocked = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) blocked[i] = navBlocked(cellX(i), cellZ(i), list) ? 1 : 0;
+
+  // snap endpoints to the nearest free cell (an animal pushed onto a rim, or a
+  // slot brushing an obstacle, must still route)
+  const nearestFree = (i0) => {
+    if (!blocked[i0]) return i0;
+    const x0 = i0 % W, z0 = (i0 / W) | 0;
+    for (let r = 1; r < 14; r++) {
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const x = x0 + dx, z = z0 + dz;
+        if (x < 0 || z < 0 || x >= W || z >= H) continue;
+        if (!blocked[z * W + x]) return z * W + x;
+      }
+    }
+    return i0;
+  };
+  const s = nearestFree(toIdx(sx, sz));
+  const t = nearestFree(toIdx(tx, tz));
+
+  const g = new Float32Array(W * H).fill(Infinity);
+  const came = new Int32Array(W * H).fill(-1);
+  const closed = new Uint8Array(W * H);
+  const open = [s];
+  g[s] = 0;
+  const hcost = (i) => Math.hypot((i % W) - (t % W), ((i / W) | 0) - ((t / W) | 0));
+  while (open.length) {
+    let bk = 0, bf = g[open[0]] + hcost(open[0]);
+    for (let k = 1; k < open.length; k++) { const f = g[open[k]] + hcost(open[k]); if (f < bf) { bf = f; bk = k; } }
+    const cur = open.splice(bk, 1)[0];
+    if (cur === t) break;
+    if (closed[cur]) continue;
+    closed[cur] = 1;
+    const cx = cur % W, cz = (cur / W) | 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dz) continue;
+      const nx = cx + dx, nz = cz + dz;
+      if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+      const ni = nz * W + nx;
+      if (blocked[ni] || closed[ni]) continue;
+      if (dx && dz && (blocked[cz * W + nx] || blocked[nz * W + cx])) continue; // no corner cutting
+      const ng = g[cur] + Math.hypot(dx, dz);
+      if (ng < g[ni]) { g[ni] = ng; came[ni] = cur; if (!open.includes(ni)) open.push(ni); }
+    }
+  }
+  if (t !== s && came[t] === -1) return null; // no route (shouldn't happen on this map)
+
+  const cells = [t];
+  for (let c = t; c !== s && came[c] !== -1;) { c = came[c]; cells.push(c); }
+  cells.reverse();
+  const pts = cells.map((i) => ({ x: cellX(i), z: cellZ(i) }));
+  pts.push({ x: tx, z: tz });
+
+  // line-of-sight smoothing: keep only the waypoints that turn a corner
+  const clearSeg = (A, B) => {
+    const n = Math.ceil(Math.hypot(B.x - A.x, B.z - A.z) / 0.3);
+    for (let k = 1; k < n; k++) {
+      const u = k / n;
+      if (navBlocked(A.x + (B.x - A.x) * u, A.z + (B.z - A.z) * u, list)) return false;
+    }
+    return true;
+  };
+  const route = [];
+  let anchor = { x: sx, z: sz };
+  let i = 0;
+  while (i < pts.length) {
+    let j = pts.length - 1;
+    while (j > i && !clearSeg(anchor, pts[j])) j--;
+    anchor = pts[j];
+    route.push(anchor);
+    if (j === pts.length - 1) break;
+    i = j + 1;
+  }
+  return route;
+}
+
 // The animal pool — a few critters that take turns visiting (never all at once).
 // [type, scale]
 const POOL = [
@@ -425,6 +528,11 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
         a.state = "gather";
         a.group.visible = true;
         a.group.scale.setScalar(a.baseScale * 1.3); // stand out for the show
+        // A* route to the stage (guaranteed clear of every major obstacle);
+        // fall back to a straight line if routing ever fails
+        a.route = findPath(a.group.position.x, a.group.position.z, sx, sz, MAJOR) || [{ x: sx, z: sz }];
+        a.wp = 0;
+        a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
         // sprint pace sized so EVERYONE reaches the stage in ~4s, however far
         // they start (and whatever the frame rate manages)
         const d = Math.hypot(sx - a.group.position.x, sz - a.group.position.z);
@@ -493,9 +601,26 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           strikePose(a, dt);
         } else if (a.state === "dance") {
           dance(a, t, dt);
-        } else if (walk(a, a.slot.x, a.slot.z, dt, t, a.hustle || 3.2, MAJOR)) { // sprint → arrive
-          a.state = "dance";
-          a.heading = FRONT_FACE;
+        } else {
+          // follow the A* route waypoint by waypoint (each leg is provably clear)
+          const route = a.route || [a.slot];
+          const wp = route[Math.min(a.wp || 0, route.length - 1)];
+          const lastLeg = (a.wp || 0) >= route.length - 1;
+          if (walk(a, wp.x, wp.z, dt, t, a.hustle || 3.2, MAJOR)) {
+            if (lastLeg) { a.state = "dance"; a.heading = FRONT_FACE; }
+            else a.wp++;
+          }
+          // watchdog: if a dancer makes no real progress for ~1.2s (pushed by a
+          // neighbour, wedged on a rim, anything), RE-PLAN from where it stands —
+          // it can always route out, so nobody ever misses the show
+          a.stuckT += dt;
+          if (a.stuckT > 1.2) {
+            if (Math.hypot(a.group.position.x - a.lastPX, a.group.position.z - a.lastPZ) < 0.25) {
+              a.route = findPath(a.group.position.x, a.group.position.z, a.slot.x, a.slot.z, MAJOR) || [{ x: a.slot.x, z: a.slot.z }];
+              a.wp = 0;
+            }
+            a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
+          }
         }
       }
       // dancers are solid too: pairwise push-apart so they never overlap on the
