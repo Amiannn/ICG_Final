@@ -93,23 +93,29 @@ export function buildWorld(scene) {
   // Vertex-coloured: meadow green at the rim fading to a misty blue-grey below,
   // so any sliver that does show (extreme zoom-out) reads as land falling away
   // into haze rather than a flat slab.
-  const skirtGeo = new THREE.CylinderGeometry(34, 34, 60, 28, 8, true);
+  // Wider + much deeper than the visible frustum at max zoom-out, so the
+  // below-horizon rays (even the near-foreground ones when fully zoomed out)
+  // always land on it. Coloured solid meadow green, only DARKENING toward the
+  // bottom (a shadowed grassy slope) — never toward blue/sky, so the band can't
+  // read as empty.
+  const skirtGeo = new THREE.CylinderGeometry(42, 42, 120, 32, 10, true);
   {
     const pos = skirtGeo.attributes.position;
     const cols = new Float32Array(pos.count * 3);
     const top = new THREE.Color(0x6f8a52);
-    const deep = new THREE.Color(0x8a98a8);
+    const deep = new THREE.Color(0x4a5c36); // darker GREEN, not blue-grey
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
-      const f = Math.min(1, Math.max(0, -pos.getY(i) / 18)); // 0 at rim → 1 by 18u down
-      c.copy(top).lerp(deep, Math.pow(f, 0.65));
+      const f = Math.min(1, Math.max(0, -pos.getY(i) / 30));
+      c.copy(top).lerp(deep, Math.pow(f, 0.7));
       cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
     }
     skirtGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
   }
   const skirt = new THREE.Mesh(skirtGeo, toonMaterial(0xffffff, { vertexColors: true }));
   skirt.material.side = THREE.BackSide;
-  skirt.position.y = -30; // top edge meets the ground plane at y = 0
+  skirt.material.fog = false; // green apron, never washed back to sky colour by fog
+  skirt.position.y = -60; // top edge (at +60 local) meets the ground plane at y = 0
   skirt.userData.noReflect = true;
   skirt.userData.skipNormal = true; // keep it out of the outline pass
   scene.add(skirt);
@@ -139,7 +145,7 @@ export function buildWorld(scene) {
 
   const rockDark = toonMaterial(0x8e9184);
   const rng3 = mulberry(606);
-  const campfireSpot = { x: 6.9, z: -0.5 }; // keep the shore clear of the campfire
+  const campfireSpot = { x: 0.6, z: 4.4 }; // keep the shore clear of the campfire (matches campfire.position below)
   const SHORE_STONES = 30;
   for (let i = 0; i < SHORE_STONES; i++) {
     const a = (i / SHORE_STONES) * Math.PI * 2 + (rng3() - 0.5) * 0.16;
@@ -330,6 +336,7 @@ export function buildWorld(scene) {
     exclude: [
       water.bounds,
       { minX: 0.6, maxX: 4.6, minZ: -0.8, maxZ: 3.2 }, // big cedar base
+      { minX: -0.5, maxX: 1.7, minZ: 3.3, maxZ: 5.5 }, // campfire pit (no grass over the flame)
     ],
   });
   grass.userData.noReflect = true; // keep the grass carpet out of the water mirror
@@ -341,6 +348,7 @@ export function buildWorld(scene) {
   const pavilion = makePavilion(toonMaterial);
   pavilion.position.set(-2, 0, 6);
   pavilion.rotation.y = 0.4; // door bay toward the pond / camera
+  pavilion.scale.setScalar(0.49); // smaller, daintier lakeside pavilion (0.7×0.7)
   scene.add(pavilion);
 
   // solid obstacles the animals must walk AROUND (they may pass through grass,
@@ -357,11 +365,11 @@ export function buildWorld(scene) {
   // in the campfire, no sheep clipped into a rock. Hills keep a slim margin
   // instead: their skirts are near-flat turf, and a fat margin would seal the
   // walkable corridors between them.
-  const BODY = 0.95;
+  const BODY = 0.68; // largest animal's half-body (cow at 0.91 scale, after the 0.7× shrink)
   const majorObstacles = [
     { x: 2.6, z: 1.2, r: 1.4 + BODY },   // cedar trunk + root flare
-    { x: 6.9, z: -0.5, r: 1.0 + BODY },  // campfire (logs + stone ring)
-    { x: -2, z: 6, r: 2.4 + BODY },      // the pavilion terrace
+    { x: 0.6, z: 4.4, r: 1.0 + BODY },   // campfire (logs + stone ring)
+    { x: -2, z: 6, r: 1.2 + BODY },      // the pavilion terrace (0.49× scaled)
     // the pond (ellipse, incl. irregular rim + body margin) — animals never wade.
     // MUST track the Water() placement above: centre (4.4, 6.8), 7×5 + rim bumps.
     { x: 4.4, z: 6.8, rx: 4.2 + 0.6, rz: 3.0 + 0.6 },
@@ -373,7 +381,7 @@ export function buildWorld(scene) {
   ];
   const obstacles = [
     ...majorObstacles,
-    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.75 })),
+    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.3 + 0.55 })),
   ];
 
   // wildlife — barnyard animals on the meadow + a flock of birds (shown only on

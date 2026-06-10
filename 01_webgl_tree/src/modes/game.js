@@ -311,6 +311,12 @@ export const gameMode = {
       }
       this.bone -= 1;
       setBoneCount(this.bone);
+      // pale bone-meal dust sprinkles over the tree + chalky motes rise at the
+      // base (sized to the tree, like the water/fertilize feedback)
+      const dayIndex = game.startDay - 1 + this.dayFloat;
+      const g = Math.min(1, Math.max(0, dayIndex / (game.growthDays - 1)));
+      this.ctx.boneBurst?.trigger(this.ctx.tree?.position, 3.5 + 17 * g, 1.6 + 3.2 * g);
+      this.ctx.boneMotes?.trigger(this.ctx.tree?.position, 2.2 + 10 * g, 1.0 + 1.6 * g);
       this.dayFloat += 2;
     }
     else if (name === "skipday30") {
@@ -354,7 +360,7 @@ export const gameMode = {
       return true;
     }
     const fire = this.ctx.world.campfire?.group.position || { x: 0.6, z: 4.4 };
-    animals.sendToFire(a, fire.x + 0.4, fire.z - 0.3);
+    animals.sendToFire(a, fire.x, fire.z); // walk into the centre of the flames
     notifyEvent("🔥", `The ${a.type} wanders toward the warm fire…`);
     return true;
   },

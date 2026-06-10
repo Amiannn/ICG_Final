@@ -236,8 +236,9 @@ function findPath(sx, sz, tx, tz, list) {
 // The animal pool — a few critters that take turns visiting (never all at once).
 // [type, scale] — kept on the small side so they slip easily between the
 // rocks, the campfire and the tree without ever looking wedged.
+// base scales (0.7× the previous size — daintier visitors)
 const POOL = [
-  ["cow", 1.3], ["sheep", 1.2], ["sheep", 1.15], ["dog", 1.1], ["cow", 1.25],
+  ["cow", 0.91], ["sheep", 0.84], ["sheep", 0.805], ["dog", 0.77], ["cow", 0.875],
 ];
 
 // per-type gait
@@ -322,6 +323,28 @@ function graze(a, t) {
   a.group.position.y = 0;
   for (const hip of a.legs) hip.rotation.x *= 0.82; // ease legs to a stand
   a.head.rotation.x = 0.72 + 0.08 * Math.sin(t * 6 + a.phase); // head down, nibbling
+}
+
+// the cedar (matches world.js: tree.position = (2.6, 0, 1.2))
+const TREE = { x: 2.6, z: 1.2 };
+// pre-cleared viewing spots ringing the trunk (just outside its ~2.08 obstacle
+// radius, all in open meadow — never in the pond or a rock), so the walk to
+// admire always has a reachable target instead of snapping somewhere odd.
+const ADMIRE_SPOTS = [
+  [2.6, 3.6], [0.2, 1.2], [0.9, -0.6], [4.3, -0.6], [2.6, -1.3],
+];
+
+// stand before the tree, turn to face it, and gaze UP at the canopy
+function admire(a, t, dt) {
+  a.group.position.y = 0;
+  for (const hip of a.legs) hip.rotation.x *= 0.82; // legs settle
+  // smoothly turn to face the tree
+  const want = Math.atan2(-(TREE.z - a.group.position.z), TREE.x - a.group.position.x);
+  let d = Math.atan2(Math.sin(want - a.heading), Math.cos(want - a.heading));
+  a.heading += Math.max(-3 * dt, Math.min(3 * dt, d));
+  a.group.rotation.y = a.heading;
+  // head tilts UP, looking at the canopy, with a slow gentle bob
+  a.head.rotation.x = -0.32 + 0.07 * Math.sin(t * 1.6 + a.phase);
 }
 
 // ANTHROPOMORPHIC DANCE BATTLE — locked to the MUSIC'S BEAT GRID.
@@ -567,7 +590,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   const _body = new THREE.Vector3();
   function animalAt(ray) {
     for (const a of anims) {
-      if (a.state !== "enter" && a.state !== "graze") continue;
+      if (!["enter", "graze", "toadmire", "admire"].includes(a.state)) continue;
       const s = a.group.scale.x;
       _body.copy(a.group.position);
       _body.y += 0.55 * s; // aim at the body, not the feet
@@ -582,7 +605,10 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   function sendToFire(a, fx, fz) {
     a.state = "tofire";
     a.fire = [fx, fz];
-    planTo(a, fx, fz);
+    // route IGNORING the campfire's own obstacle so it walks right INTO the
+    // flames (not to the rim), then roasts at the centre
+    const list = OBSTACLES.filter((o) => Math.hypot((o.x || 0) - fx, (o.z || 0) - fz) > 1.2);
+    planTo(a, fx, fz, list);
   }
 
   // tap pick-up: returns the dropping's world spot (and clears it) or null
@@ -796,6 +822,26 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           }
         }
         if (a.grazeT <= 0) {
+          // ...then wander up to the tree for a look before heading off:
+          // pick the nearest pre-cleared viewing spot so the walk is reachable
+          a.state = "toadmire";
+          const px = a.group.position.x, pz = a.group.position.z;
+          let best = ADMIRE_SPOTS[0], bd = Infinity;
+          for (const sp of ADMIRE_SPOTS) {
+            const d = (sp[0] - px) ** 2 + (sp[1] - pz) ** 2;
+            if (d < bd) { bd = d; best = sp; }
+          }
+          planTo(a, best[0], best[1]);
+        }
+      } else if (a.state === "toadmire") {
+        if (followRoute(a, dt, t)) {
+          a.state = "admire";
+          a.admireT = rand(3.0, 5.5); // gaze up at the tree for a few seconds
+        }
+      } else if (a.state === "admire") {
+        admire(a, t, dt);
+        a.admireT -= dt;
+        if (a.admireT <= 0) {
           a.state = "leave";
           planTo(a, a.path.exit[0], a.path.exit[1]);
         }

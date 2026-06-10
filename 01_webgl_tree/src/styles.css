@@ -54,6 +54,19 @@ body {
   touch-action: none;
 }
 
+/* On an actual phone, drop the fixed phone-frame aspect and fill the whole
+   device screen at its real proportions (the canvas + edge-anchored HUD adapt
+   to any aspect). Desktop / wide windows keep the centred phone frame above. */
+@media (max-width: 640px), (pointer: coarse) and (max-width: 900px) {
+  #app {
+    width: 100vw;
+    height: 100dvh;
+    aspect-ratio: auto;
+    max-width: none;
+    box-shadow: none;
+  }
+}
+
 #scene {
   position: absolute;
   inset: 0;
@@ -63,6 +76,7 @@ body {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   cursor: grab;
+  touch-action: none; /* we handle drag/pinch ourselves (no browser page-zoom) */
 }
 #scene.dragging {
   cursor: grabbing;
@@ -199,15 +213,16 @@ body {
    cluster) so it never covers the pond or other tappable scenery */
 .notify {
   position: absolute;
-  top: 132px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100% - 56px);
-  white-space: nowrap;
+  bottom: calc(100% + 6px); /* float just above the bottom cluster (time slider) */
+  left: 18px;
+  right: 18px;
+  transform: none;
+  width: max-content;
+  max-width: calc(100% - 36px);
+  margin: 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0;
   padding: 13px 20px;
   border: none;
   border-radius: 16px;
@@ -222,16 +237,23 @@ body {
 }
 .notify.hidden {
   opacity: 0;
-  transform: translateX(-50%) translateY(-8px);
+  transform: translateY(8px);
   pointer-events: none;
 }
 .notify-icon {
   font-size: 20px;
   line-height: 1;
+  flex: 0 0 auto;
+}
+.notify-text {
+  white-space: normal; /* wrap long event text instead of spilling out */
+  min-width: 0;
+  line-height: 1.25;
 }
 .notify .chev {
   width: 18px;
   height: 18px;
+  flex: 0 0 auto;
   color: var(--ink-soft);
 }
 

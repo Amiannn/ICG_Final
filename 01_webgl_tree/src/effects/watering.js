@@ -6,7 +6,7 @@ import * as THREE from "three";
 // spawn in a disc above the canopy, fall through it and vanish at the ground.
 // All motion runs in the vertex shader off a single "seconds since trigger"
 // uniform, so the burst costs nothing while idle.
-export function makeWatering({ count = 320 } = {}) {
+export function makeWatering({ count = 320, color = 0x8fd0f5, ripple = true } = {}) {
   const disc = new Float32Array(count * 2); // unit-disc xz, denser middle
   const delay = new Float32Array(count);
   const speed = new Float32Array(count);
@@ -39,7 +39,7 @@ export function makeWatering({ count = 320 } = {}) {
       uCenter: { value: new THREE.Vector3(2.6, 0, 1.2) },
       uTop: { value: 16 }, // spawn height above the ground
       uRadius: { value: 4 }, // sprinkle disc radius
-      uColor: { value: new THREE.Color(0x8fd0f5) },
+      uColor: { value: new THREE.Color(color) },
     },
     vertexShader: /* glsl */ `
       attribute vec2 aDisc;
@@ -185,7 +185,7 @@ export function makeWatering({ count = 320 } = {}) {
       t0 = t;
       pending = false;
       points.visible = true;
-      splash.visible = true;
+      splash.visible = ripple;
     }
     if (t0 == null) return;
     const el = t - t0;

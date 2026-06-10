@@ -3,7 +3,7 @@ import { settings, palette } from "./config.js";
 import { PixelCamera } from "./camera.js";
 import { Lighting } from "./lighting.js";
 import { buildWorld } from "./scene/world.js";
-import { DustParticles } from "./effects/particles.js";
+import { DustParticles, Fireflies } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
@@ -34,6 +34,8 @@ const pixel = new PixelCamera();
 const lighting = new Lighting(scene);
 const world = buildWorld(scene);
 const dust = new DustParticles();
+const fireflies = new Fireflies();
+scene.add(fireflies.points);
 scene.add(dust.points);
 const pipeline = new Pipeline(renderer, pixel);
 const rainSound = makeRainSound();
@@ -46,6 +48,10 @@ const fertBurst = makeFertilizeBurst();
 scene.add(fertBurst.points); // rising nutrient motes on Fertilize
 const emberBurst = makeFertilizeBurst({ count: 130, color: 0xffac4f });
 scene.add(emberBurst.points); // campfire flare when a visitor is... rendered
+const boneBurst = makeWatering({ count: 220, color: 0xf3efe2, ripple: false });
+scene.add(boneBurst.group); // pale bone-meal dust sprinkled on Bone Meal
+const boneMotes = makeFertilizeBurst({ count: 120, color: 0xeae6dc });
+scene.add(boneMotes.points); // chalky motes rising at the trunk on Bone Meal
 
 // Day-30 festival: fireworks + a pulsing point light that lights up the dancing
 // animals as each shell bursts (driven by game mode from the burst flash).
@@ -77,6 +83,7 @@ const ctx = {
   tree: world.tree,
   world,
   dust,
+  fireflies,
   rainSplash,
   rainSound,
   fireworks,
@@ -84,6 +91,8 @@ const ctx = {
   watering,
   fertBurst,
   emberBurst,
+  boneBurst,
+  boneMotes,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
@@ -138,40 +147,76 @@ resize();
 canvas.style.cursor = "grab";
 const _tapRay = new THREE.Raycaster();
 const _tapNdc = new THREE.Vector2();
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-let moved = 0; // accumulated pointer travel (px) to tell taps from drags
 const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
 const TAP_SLOP_PX = 8;
 const TAP_MAX_MS = 350;
-let downT = 0;
+const BASE_VIEW = 36; // modes without a viewBase() (realtime/growth/morph)
+let zoomFactor = 1; // multiplied onto the mode's base view height (wheel + pinch)
+
+// Multi-touch: one Map of live pointers. 1 finger = orbit (yaw); 2 fingers =
+// pinch zoom. A clean single-finger press/release is a tap.
+const pointers = new Map(); // id -> {x, y}
+let dragging = false;
+let pinched = false; // a 2-finger pinch happened this gesture (suppresses tap)
+let lastX = 0, lastY = 0, downT = 0, moved = 0;
+let pinchDist = 0;
+const twoFingerDist = () => {
+  const it = pointers.values();
+  const a = it.next().value, b = it.next().value;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
 canvas.addEventListener("pointerdown", (e) => {
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  downT = performance.now();
-  moved = 0;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   canvas.setPointerCapture(e.pointerId);
-  canvas.style.cursor = "grabbing";
+  if (pointers.size === 1) {
+    dragging = true;
+    pinched = false;
+    lastX = e.clientX; lastY = e.clientY; downT = performance.now(); moved = 0;
+    canvas.style.cursor = "grabbing";
+  } else if (pointers.size === 2) {
+    dragging = false; // a second finger cancels the orbit + starts a pinch
+    pinched = true;
+    pinchDist = twoFingerDist();
+  }
 });
 canvas.addEventListener("pointermove", (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size >= 2) {
+    const d = twoFingerDist();
+    if (pinchDist > 1 && d > 1) {
+      // spread fingers → zoom in (smaller view height); pinch → zoom out
+      zoomFactor = Math.min(2.2, Math.max(0.45, zoomFactor * (pinchDist / d)));
+    }
+    pinchDist = d;
+    return;
+  }
   if (!dragging) return;
   const dx = e.clientX - lastX;
-  const dy = e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  moved += Math.abs(dx) + Math.abs(dy);
+  lastX = e.clientX; lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(e.clientY - lastY);
   pixel.setYaw(pixel.yaw - dx * YAW_SENSITIVITY);
 });
 const endDrag = (e, mayTap = false) => {
-  if (!dragging) return;
-  dragging = false;
-  if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
+  const had = pointers.has(e.pointerId);
+  pointers.delete(e.pointerId);
+  if (e && e.pointerId != null && canvas.hasPointerCapture?.(e.pointerId)) {
     canvas.releasePointerCapture(e.pointerId);
   }
+  // dropping from 2→1 finger: re-anchor the orbit to the remaining finger
+  if (pointers.size === 1) {
+    const p = pointers.values().next().value;
+    lastX = p.x; lastY = p.y; dragging = true;
+    return;
+  }
+  if (pointers.size >= 1) return; // still pinching with others
   canvas.style.cursor = "grab";
-  if (mayTap && moved < TAP_SLOP_PX && performance.now() - downT < TAP_MAX_MS) {
+  const wasDrag = dragging;
+  dragging = false;
+  pinchDist = 0;
+  if (mayTap && had && wasDrag && !pinched && moved < TAP_SLOP_PX && performance.now() - downT < TAP_MAX_MS) {
     const r = canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
@@ -208,12 +253,9 @@ canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
-// Mouse-wheel zoom — a FACTOR multiplied onto the mode's base view height
-// (game mode's base follows the tree's growth: close on the sprout, pulled
-// back for the full cedar). The camera is orthographic, so zoom = scaling
-// the visible world height.
-const BASE_VIEW = 36; // modes without a viewBase() (realtime/growth/morph)
-let zoomFactor = 1;
+// Mouse-wheel zoom (desktop) — same zoomFactor the touch pinch drives. The
+// camera is orthographic, so zoom = scaling the visible world height; the
+// factor is applied over the mode's base view in the render loop.
 canvas.addEventListener(
   "wheel",
   (e) => {
@@ -250,6 +292,8 @@ function render() {
   watering.setTime(time); // animate the Water-action sprinkle burst
   fertBurst.setTime(time); // animate the Fertilize nutrient motes
   emberBurst.setTime(time); // animate the campfire roast flare
+  boneBurst.setTime(time); // animate the Bone Meal dust
+  boneMotes.setTime(time); // animate the Bone Meal rising motes
   // day/night cross-fade; silent in rain (rain sound only) and under the festival show
   music.setDayness(lighting.dayness, settings.rain || !!ctx.festivalActive);
   tickFps();

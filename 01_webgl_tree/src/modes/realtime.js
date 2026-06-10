@@ -57,6 +57,14 @@ export const realtimeMode = {
     // lighting.dayness tracks every time-of-day path (cycle, game clock, Night)
     world.water.material.uniforms.uNight.value = 1 - lighting.dayness;
     dust.setTime(time);
+    // dust motes give way to fireflies after dark: dust fades out, the green
+    // fireflies blink in (and not in the rain)
+    const night = 1 - lighting.dayness;
+    dust.material.uniforms.uIntensity.value = 0.6 * lighting.dayness;
+    if (ctx.fireflies) {
+      ctx.fireflies.setTime(time);
+      ctx.fireflies.setNight(settings.dust ? night * (settings.rain ? 0 : 1) : 0);
+    }
     if (ctx.rainSplash) ctx.rainSplash.setTime(time); // animate rain-impact rings
 
     // campfire fades in only at night, and is doused by rain
