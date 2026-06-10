@@ -513,13 +513,14 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   let lastT = null;
   let gap = rand(2, 6); // first visitor wanders in a few seconds after load
   let party = false;
+  let posing = false; // the end pose has been called — late arrivals join it
 
   // Festival! Every animal gathers to the front row and breakdances. Overrides
   // the normal visit logic until turned off (then they disperse off-screen).
   function setParty(on) {
     party = !!on;
     if (on) {
-      beatStep = 0; battleIdx = 0;
+      beatStep = 0; battleIdx = 0; posing = false;
       anims.forEach((a, i) => {
         const sl = FRONT_SLOTS[i % FRONT_SLOTS.length];
         const [sx, sz] = resolveXZ(sl.x, sl.z, MAJOR); // slots clear of pond/hills/trunk
@@ -544,8 +545,9 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
         a.group.rotation.x = 0;
         a.group.scale.setScalar(a.baseScale);
         a.state = "leave";
-        // disperse past the camera (clear, hill-free ground off the bottom edge)
-        a.path = { exit: [21, a.group.position.z] };
+        // disperse past the camera through the GAP between the mid-distance
+        // hills at (27,-5) and (26,15) — off the bottom edge, never up a slope
+        a.path = { exit: [23, Math.max(1.5, Math.min(8, a.group.position.z))] };
       });
     }
   }
@@ -561,7 +563,9 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   }
 
   // the show's last seconds: everyone snaps into their hero pose and holds it
+  // (anyone still sprinting in joins the pose the moment they arrive)
   function endPose() {
+    posing = true;
     anims.forEach((a) => { if (a.state === "dance") a.state = "pose"; });
   }
 
@@ -607,7 +611,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           const wp = route[Math.min(a.wp || 0, route.length - 1)];
           const lastLeg = (a.wp || 0) >= route.length - 1;
           if (walk(a, wp.x, wp.z, dt, t, a.hustle || 3.2, MAJOR)) {
-            if (lastLeg) { a.state = "dance"; a.heading = FRONT_FACE; }
+            if (lastLeg) { a.state = posing ? "pose" : "dance"; a.heading = FRONT_FACE; }
             else a.wp++;
           }
           // watchdog: if a dancer makes no real progress for ~1.2s (pushed by a

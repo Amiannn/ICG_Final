@@ -87,7 +87,7 @@ export const gameMode = {
     // festival music — plays ONLY while the animals dance on the night of Day 30
     // (the player's track at public/festival_music.mp3).
     this.music = new Audio(import.meta.env.BASE_URL + "festival_music.mp3");
-    this.music.loop = true;
+    this.music.loop = false; // the track plays ONCE — its ending closes the show
     this.music.volume = 0.8;
     // unlock the audio element on the first user tap so it can auto-play at Day 30
     this._prime = () => {
@@ -153,13 +153,28 @@ export const gameMode = {
       this._startFestival();
     }
     if (this.festival) {
-      this.festivalTimer -= dt;
-      // the last beats: everyone snaps into a held HERO POSE under the finale
-      if (this.festivalTimer <= 2.8 && !this._posed) {
+      this.festivalT += dt;
+      this.festivalTimer -= dt; // hard safety ceiling only (audio-failure case)
+
+      // The show's timeline FOLLOWS THE MUSIC: as the track reaches its final
+      // bars everyone snaps into a held HERO POSE — the song ends on the pose —
+      // and after a few seconds of admiring it under the last fading shells,
+      // the show closes and the dancers disperse. If the audio never started
+      // (blocked autoplay), the elapsed-time clock stands in for the track.
+      const m = this.music;
+      const dur = m && isFinite(m.duration) && m.duration > 1 ? m.duration : 25.3;
+      const tm = m && m.currentTime > 0.2 ? m.currentTime : this.festivalT;
+      if (!this._posed && tm >= dur - 1.5) {
         this._posed = true;
         ctx.world.animals?.endPose?.();
       }
-      if (this.festivalTimer <= 0) this._endFestival();
+      if (this._posed) {
+        this._poseHold += dt;
+        if (this._poseHold >= 5.0 || this.festivalTimer <= 0) this._endFestival();
+      } else if (this.festivalTimer <= 0) {
+        this._endFestival();
+      }
+
       // ease the camera back to the default framing for the show, so the front-
       // row stage faces the screen (out-pulls the slow ambient auto-orbit)
       const yaw = ctx.pixel.yaw;
@@ -275,9 +290,13 @@ export const gameMode = {
     }
     this.festival = true;
     this.ctx.festivalActive = true; // main.js ducks the ambient under the show
-    this.festivalTimer = 28;
+    this.festivalT = 0;       // elapsed show time (audio-fallback clock)
+    this.festivalTimer = 45;  // hard safety ceiling — music length drives the real end
     this._posed = false;
-    this.ctx.fireworks?.start(26);
+    this._poseHold = 0;
+    // barrage sized to the track: the finale lands on its last bars, and the
+    // final shells fade out right over the held end pose
+    this.ctx.fireworks?.start(24);
     this.ctx.world.animals?.party(true);
     if (this.music) { this.music.currentTime = 0; this.music.play().catch(() => {}); }
     notifyEvent("🎆", "Day 30 — the festival begins!");
@@ -298,7 +317,11 @@ export const gameMode = {
       const frac = phase - Math.floor(phase);  // 0..1 within the beat
       pulse = Math.max(0, 1 - frac * 3.0);      // sharp hit ON the beat, quick decay
     }
-    const finale = this.festivalTimer <= 7;     // last stretch: everyone all-out
+    // the track's last ~7 seconds: everyone all-out until the end pose
+    const m = this.music;
+    const dur = m && isFinite(m.duration) && m.duration > 1 ? m.duration : 25.3;
+    const tm = m && m.currentTime > 0.2 ? m.currentTime : this.festivalT || 0;
+    const finale = tm >= dur - 7;
     this.ctx.world.animals?.setBeat?.(0.85, pulse, step, finale);
   },
 

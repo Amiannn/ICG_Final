@@ -278,8 +278,10 @@ export function buildWorld(scene) {
     // the pond (ellipse, incl. irregular rim + body margin) — animals never wade.
     // MUST track the Water() placement above: centre (4.4, 6.8), 7×5 + rim bumps.
     { x: 4.4, z: 6.8, rx: 4.6, rz: 3.4 },
-    // the close hills are solid ground — walk around, never through the slope
+    // every hill is solid ground — walk around, never through a slope (the
+    // mid-distance hills matter too: the festival dismissal heads their way)
     ...hillPlacements.map(([x, z, w, , d]) => ({ x, z, rx: w + 0.3, rz: d + 0.3 })),
+    ...midHills.map(([x, z, w, , d]) => ({ x, z, rx: w + 0.3, rz: d + 0.3 })),
     ...bigRocks.map(([x, z, s]) => ({ x, z, r: s * 1.3 + 0.5 })),
   ];
   const obstacles = [
