@@ -21,12 +21,14 @@ export class PixelCamera {
     // is baseEyeOffset rotated around Y by `yaw` so the user can drag the view
     // horizontally. Rotation can't be texel-snapped, so expect a touch of swim
     // while dragging — it settles once the yaw stops changing.
-    this.baseEyeOffset = new THREE.Vector3(13, 5.5, 13); // low-ish eye, angled enough that the ground fills the lower frame
+    this.baseEyeOffset = new THREE.Vector3(13, 4.3, 13); // low eye, just enough angle that the ground fills the lower frame
     this.eyeOffset = this.baseEyeOffset.clone();
     this.yaw = 0;
     this._yAxis = new THREE.Vector3(0, 1, 0);
     this.desiredTarget = this.target.clone();
     this.desiredPosition = this.target.clone().add(this.eyeOffset);
+    // default framing: yawed so the pond sits at the lower-left of the tree
+    this.setYaw(0.85);
 
     this.snapEnabled = true;
     this.resolutionY = 270;
