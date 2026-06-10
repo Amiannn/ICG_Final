@@ -130,12 +130,27 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
+// Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
+// visible world height; resize() re-derives the frustum + render targets.
+const ZOOM_MIN = 14, ZOOM_MAX = 46;
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const factor = Math.exp(e.deltaY * 0.0012); // smooth exponential zoom
+    pixel.viewHeight = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pixel.viewHeight * factor));
+    resize();
+  },
+  { passive: false },
+);
+
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(render);
 
 function render() {
   const time = clock.getElapsedTime();
   currentMode.render(ctx, time);
+  music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
   tickFps();
 }
 
