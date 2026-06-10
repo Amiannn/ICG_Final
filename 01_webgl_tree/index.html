@@ -36,20 +36,21 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.6C10.4 5.4 8.4 4.9 6 5.1c-.7 0-1.1.6-1.1 1.2v11c0 .8.6 1.3 1.4 1.2 2-.2 3.9.3 5.7 1.5 1.8-1.2 3.7-1.7 5.7-1.5.8.1 1.4-.4 1.4-1.2v-11c0-.6-.5-1.2-1.1-1.2-2.4-.2-4.4.3-6 1.5Z"/><path d="M12 6.6V19"/></svg>
             </button>
             <button class="round-btn" id="btn-settings" title="Settings">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.3 13.4a7.5 7.5 0 0 0 0-2.8l1.8-1.4-1.8-3.1-2.1.8a7.5 7.5 0 0 0-2.5-1.4L14.4 3h-3.6l-.3 2.5a7.5 7.5 0 0 0-2.5 1.4l-2.1-.8-1.8 3.1 1.8 1.4a7.5 7.5 0 0 0 0 2.8L2.3 14.8l1.8 3.1 2.1-.8a7.5 7.5 0 0 0 2.5 1.4l.3 2.5h3.6l.3-2.5a7.5 7.5 0 0 0 2.5-1.4l2.1.8 1.8-3.1-1.8-1.4Z"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
 
+        <!-- event notification: floats under the top bar so it never covers
+             the pond or other tappable scenery -->
+        <button class="notify hidden" id="notify">
+          <span class="notify-icon" id="notify-icon">🦌</span>
+          <span class="notify-text" id="notify-text">A little deer visited!</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </button>
+
         <!-- bottom cluster: time slider + action sheet -->
         <div class="bottom-cluster">
-
-          <!-- event notification: floats just above the time slider -->
-          <button class="notify hidden" id="notify">
-            <span class="notify-icon" id="notify-icon">🦌</span>
-            <span class="notify-text" id="notify-text">A little deer visited!</span>
-            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-          </button>
 
           <!-- time-of-day slider -->
           <div class="time-slider" id="time-slider">

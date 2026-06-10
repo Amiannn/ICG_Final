@@ -213,7 +213,7 @@ body {
    cluster) so it never covers the pond or other tappable scenery */
 .notify {
   position: absolute;
-  bottom: calc(100% + 6px); /* float just above the bottom cluster (time slider) */
+  top: 132px; /* just below the topbar info card */
   left: 18px;
   right: 18px;
   transform: none;
@@ -237,7 +237,7 @@ body {
 }
 .notify.hidden {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(-8px);
   pointer-events: none;
 }
 .notify-icon {
@@ -649,4 +649,111 @@ input[type="range"] {
   text-align: center;
   color: var(--cream-soft);
   opacity: 0.6;
+}
+
+/* ============================================================
+   Compact HUD on real phones (same query as the #app full-screen
+   override above). Phone screens are shorter than the desktop
+   9:19.5 frame, so every panel slims down to keep the scene —
+   especially the tappable pond — unobstructed.
+   ============================================================ */
+@media (max-width: 640px), (pointer: coarse) and (max-width: 900px) {
+  /* top bar: smaller card + buttons, hug the safe area */
+  .topbar {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 12px;
+    right: 12px;
+  }
+  .info-card {
+    padding: 8px 14px;
+    border-radius: 14px;
+  }
+  .info-card .title {
+    font-size: 16px;
+    white-space: nowrap;
+  }
+  .info-card .subtitle {
+    margin-top: 2px;
+    font-size: 12px;
+  }
+  .round-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .round-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* event toast: tuck right under the smaller info card */
+  .notify {
+    top: calc(74px + env(safe-area-inset-top, 0px));
+    left: 12px;
+    right: 12px;
+    max-width: calc(100% - 24px);
+    padding: 9px 14px;
+    gap: 8px;
+    font-size: 13px;
+    border-radius: 13px;
+  }
+  .notify-icon {
+    font-size: 17px;
+  }
+
+  /* time slider: slimmer panel, smaller icons */
+  .time-slider {
+    width: calc(100% - 24px);
+    margin-bottom: 8px;
+    padding: 8px 16px 14px;
+    max-height: 110px;
+  }
+  .track {
+    height: 26px;
+  }
+  .track-line {
+    top: 12px;
+  }
+  .t-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+  .knob {
+    top: 27px;
+    width: 15px;
+    height: 15px;
+    margin-left: -7.5px;
+  }
+
+  /* action sheet: smaller buttons, much tighter padding */
+  .sheet {
+    padding: 4px 14px calc(10px + env(safe-area-inset-bottom));
+    border-radius: 20px 20px 0 0;
+  }
+  .sheet-handle {
+    padding: 2px 0 8px;
+  }
+  .action {
+    gap: 6px;
+  }
+  .action-icon {
+    width: 58px;
+    height: 58px;
+  }
+  .action-icon svg,
+  .action-icon img {
+    width: 36px;
+    height: 36px;
+  }
+  .action-label {
+    font-size: 12px;
+  }
+  .count-badge {
+    top: -2px;
+    right: -2px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    font-size: 11px;
+  }
 }
