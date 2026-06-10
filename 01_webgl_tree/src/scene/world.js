@@ -44,31 +44,8 @@ export function buildWorld(scene) {
     scene.add(hill);
   }
 
-  // Far horizon ring — large dodecahedrons placed at radius ~28-46 units
-  // around the scene to fill the mid-distance in PT mode (which ignores fog)
-  // and read as the "the world continues into hills" silhouette the
-  // reference image has. In realtime they sit past the fog far plane (72),
-  // so they only stop fading at the closer ones and don't change the look.
-  const farHills = [
-    [-32, -18, 9, 2.6, 3.2],
-    [-12, -28, 8, 2.2, 3.0],
-    [18, -32, 10, 2.4, 3.4],
-    [38, -10, 9, 2.5, 3.0],
-    [42, 18, 8, 2.0, 2.8],
-    [22, 36, 9, 2.3, 3.1],
-    [-18, 42, 10, 2.6, 3.2],
-    [-38, 24, 8.5, 2.1, 2.9],
-    [-44, -6, 9, 2.4, 3.0],
-  ];
-  for (const [x, z, w, h, d] of farHills) {
-    const hill = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mats.hill);
-    hill.position.set(x, h * 0.3, z);
-    hill.scale.set(w, h, d);
-    hill.rotation.set(0.12, x * 0.13, -0.05);
-    hill.castShadow = true;
-    hill.receiveShadow = true;
-    scene.add(hill);
-  }
+  // (the old far-horizon dodecahedron ring was replaced by the displaced
+  // mountain-ring terrain below — see makeMountainRing.)
 
   // mid-distance hills — fill the skyline between the close hills and the far
   // horizon ring so the background behind the cedar isn't empty. Kept at
@@ -94,6 +71,13 @@ export function buildWorld(scene) {
     hill.receiveShadow = true;
     scene.add(hill);
   }
+
+  // mountain ring — a displaced terrain mesh surrounding the meadow. Flat in
+  // the play area (r < ~30, where the grass lives and the camera orbits), then
+  // rolling ridges that climb into proper peaks toward the fog line, with the
+  // summits blending toward rock. Reads as continuous landscape undulation
+  // rather than placed polyhedra.
+  scene.add(makeMountainRing());
 
   // water — a large foreground lake. With the iso/orthographic camera a tall
   // tree's mirror image streaks far toward the camera (along world x−z ≈ const),
@@ -212,8 +196,8 @@ export function buildWorld(scene) {
 
   // grass field (avoid water + tree base)
   const grass = makeGrass({
-    count: 18000,
-    area: 44,
+    count: 32000,
+    area: 58,
     exclude: [
       water.bounds,
       { minX: 0.6, maxX: 4.6, minZ: -0.8, maxZ: 3.2 }, // big cedar base
@@ -280,6 +264,48 @@ function makeFlower(x, z, bloomMat, scale, stemMat) {
   bloom.castShadow = true;
   g.add(bloom);
   return g;
+}
+
+// A ring of rolling terrain: a plane whose vertices are displaced by layered
+// sine "noise", flat inside r≈30 (meadow + camera orbit), swelling into ridges
+// and peaks (up to ~13 units) toward the fog line. Vertex colours blend the
+// hill green toward rock grey on the high summits; smooth normals let the toon
+// ramp band it like natural slopes.
+function makeMountainRing() {
+  const SIZE = 150, SEG = 110;
+  const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+  geo.rotateX(-Math.PI / 2);
+
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const grassC = new THREE.Color(0x86a55f);
+  const rockC = new THREE.Color(0xa8aa9a);
+  const c = new THREE.Color();
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const r = Math.hypot(x, z);
+    // layered, smooth pseudo-noise in [-1, 1]
+    const n =
+      (Math.sin(x * 0.1 + 1.7) * Math.cos(z * 0.085 - 0.6) +
+        0.5 * Math.sin(x * 0.21 - 0.9) * Math.cos(z * 0.17 + 1.2) +
+        0.25 * Math.sin(x * 0.43 + 0.4) * Math.cos(z * 0.37 - 1.1)) / 1.75;
+    const swell = 2.6 * _ss(28, 40, r); // gentle base rise out of the meadow
+    const peaks = 11 * _ss(31, 54, r) * (0.5 + 0.5 * n); // ridges → summits
+    // sit 0.12 below the flat ground plane so the coplanar centre never
+    // z-fights with it — only the risen slopes break the surface
+    const h = swell + peaks - 0.12;
+    pos.setY(i, h);
+
+    c.copy(grassC).lerp(rockC, _ss(6.5, 12.5, h)); // high ground turns rocky
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geo, toonMaterial(0xffffff, { vertexColors: true }));
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 function mulberry(seed) {

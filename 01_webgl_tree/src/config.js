@@ -13,8 +13,8 @@ export const settings = {
   night: false,
   cycle: true, // continuous day–night cycle (overrides the Night toggle while on)
   grain: false,
-  verticalResolution: 540,
-  outlineStrength: 0.0,
+  verticalResolution: 720,
+  outlineStrength: 0.05,
   timeOfDay: 0.0, // game slider position (0 sunrise → 1 night); set by the UI
   species: "cedar", // game tree species: "cedar" (billboard cedar) | "morph"
   music: true, // gentle procedural ambient background music

@@ -65,10 +65,9 @@ export const gameMode = {
     // weather: alternating dry spells / showers
     this.raining = false;
     this.weatherTimer = rand(game.rainMinGapSeconds, game.rainMaxGapSeconds);
-    this.waterPulse = 0;
     this.lastRain = null;
 
-    // Day-30 night festival (fireworks + dancing animals), set off by a hotkey.
+    // Day-30 night festival (fireworks + dancing animals), starts automatically.
     this.festival = false;
     this.festivalTimer = 0;
     this._festivalDone = false;
@@ -94,6 +93,19 @@ export const gameMode = {
       this._prime = null;
     };
     window.addEventListener("pointerdown", this._prime);
+
+    // toast + journal whenever a wild visitor strolls in
+    const VISIT = {
+      cow: ["🐄", "A cow wandered over!"],
+      sheep: ["🐑", "A little sheep visited!"],
+      dog: ["🐶", "A dog trotted by!"],
+    };
+    if (ctx.world.animals) {
+      ctx.world.animals.onVisit = (type) => {
+        const [icon, text] = VISIT[type] || ["🐾", "A visitor arrived!"];
+        notifyEvent(icon, text);
+      };
+    }
 
     setDay(game.startDay);
     this._apply(ctx);
@@ -190,12 +202,9 @@ export const gameMode = {
         : rand(game.rainMinGapSeconds, game.rainMaxGapSeconds);
       if (this.raining) notifyEvent("🌧️", "It started raining.");
     }
-    if (this.waterPulse > 0) this.waterPulse -= dt;
-
-    const wantRain = this.raining || this.waterPulse > 0;
-    if (wantRain !== this.lastRain) {
-      ctx.setRain?.(wantRain);
-      this.lastRain = wantRain;
+    if (this.raining !== this.lastRain) {
+      ctx.setRain?.(this.raining);
+      this.lastRain = this.raining;
     }
   },
 
@@ -205,8 +214,15 @@ export const gameMode = {
   },
 
   action(name) {
-    if (name === "water") this.waterPulse = 3.0;
-    else if (name === "fertilize") this.dayFloat += 1;
+    if (name === "water") {
+      // sprinkle the tree as it currently stands (height/spread follow growth)
+      const dayIndex = game.startDay - 1 + this.dayFloat;
+      const g = Math.min(1, Math.max(0, dayIndex / (game.growthDays - 1)));
+      const top = 3.5 + 17 * g;
+      const radius = 1.6 + 3.2 * g;
+      this.ctx.watering?.trigger(this.ctx.tree?.position, top, radius);
+      this.dayFloat += 1; // a drink = one day's growth
+    } else if (name === "fertilize") this.dayFloat += 1;
     else if (name === "bonemeal") this.dayFloat += 2;
   },
 
@@ -267,6 +283,7 @@ export const gameMode = {
     if (ctx.pipeline.composite.uniforms.uFlash) ctx.pipeline.composite.uniforms.uFlash.value.setRGB(0, 0, 0);
     delete window.__festival;
     delete window.__gameDay;
+    if (ctx.world.animals) ctx.world.animals.onVisit = null;
     if (this.lastRain) ctx.setRain?.(false);
     ctx.tod = null;
     ctx.growthReveal = null;

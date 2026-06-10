@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { toonMaterial } from "../materials.js";
+import { game } from "../config.js";
 
 // Low-poly, cel-shaded barnyard animals that wander and graze on the meadow in
 // clear weather. Built from simple boxes/icospheres to match the flat pixel-art
@@ -138,19 +139,21 @@ const TRAITS = {
 };
 
 // A few meadow routes: walk in from off-screen → graze spot → walk back out.
-// All graze spots avoid the pond + tree base.
+// Graze spots sit right beside the tree (trunk at 2.6,1.2 — kept ~2-3 units
+// clear of it), while still avoiding the pond and the campfire.
 const PATHS = [
-  { enter: [-13, 3], graze: [-5.5, 2.5], exit: [-13, -1] },
-  { enter: [-9, -9], graze: [-3.5, -4.5], exit: [-13, -7] },
-  { enter: [-12, 7], graze: [-5, 6], exit: [-13, 9] },
-  { enter: [13, -7], graze: [8.5, -4], exit: [14, -9] },
-  { enter: [3, -11], graze: [-1, -6.5], exit: [6, -13] },
-  { enter: [-7, 10], graze: [-2.5, 8.5], exit: [-11, 12] },
+  { enter: [-13, 3], graze: [0.4, 2.2], exit: [-13, -1] },
+  { enter: [-9, -9], graze: [0.2, -0.8], exit: [-13, -7] },
+  { enter: [3, -11], graze: [3.2, -1.6], exit: [6, -13] },
+  { enter: [13, -7], graze: [4.8, -1.2], exit: [14, -9] },
+  { enter: [-12, 7], graze: [-0.6, 0.6], exit: [-13, 9] },
+  { enter: [-7, 10], graze: [-0.2, 3.0], exit: [-11, 12] },
 ];
 
 // Visit pacing (in seconds of clear-weather daytime).
 const GAP_MIN = 8, GAP_MAX = 26;   // wait between visits
-const GRAZE_MIN = 4, GRAZE_MAX = 9; // how long a visitor lingers, head down
+// visitors settle in for about half an in-game day before wandering off
+const GRAZE_DAY_MIN = 0.45, GRAZE_DAY_MAX = 0.65; // fraction of a day
 
 // Walk the animal toward (tx,tz); animate trot + heading. Returns true on arrival.
 function walk(a, tx, tz, dt, t) {
@@ -362,6 +365,7 @@ export function makeAnimals(obstacles = []) {
       a.group.visible = true;
       a.heading = Math.atan2(-(path.graze[1] - path.enter[1]), path.graze[0] - path.enter[0]);
       a.group.rotation.y = a.heading;
+      api.onVisit?.(a.type); // let the game toast + journal the arrival
     }
   }
 
@@ -415,7 +419,7 @@ export function makeAnimals(obstacles = []) {
       if (a.state === "enter") {
         if (walk(a, a.path.graze[0], a.path.graze[1], dt, t)) {
           a.state = "graze";
-          a.grazeT = rand(GRAZE_MIN, GRAZE_MAX);
+          a.grazeT = rand(GRAZE_DAY_MIN, GRAZE_DAY_MAX) * game.dayLengthSeconds;
         }
       } else if (a.state === "graze") {
         graze(a, t);
@@ -430,5 +434,7 @@ export function makeAnimals(obstacles = []) {
     }
   }
 
-  return { group, update, party: setParty, setBeat };
+  // onVisit(type) is assignable by the game to be told when a visitor arrives
+  const api = { group, update, party: setParty, setBeat, onVisit: null };
+  return api;
 }

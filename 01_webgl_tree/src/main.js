@@ -6,6 +6,7 @@ import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
+import { makeWatering } from "./effects/watering.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeFireworks } from "./effects/fireworks.js";
 import { Pipeline } from "./pipeline.js";
@@ -37,6 +38,8 @@ const rainSound = makeRainSound();
 const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
+const watering = makeWatering();
+scene.add(watering.group); // droplets + local ground ripples
 
 // Day-30 festival: fireworks + a pulsing point light that lights up the dancing
 // animals as each shell bursts (driven by game mode from the burst flash).
@@ -72,6 +75,7 @@ const ctx = {
   rainSound,
   fireworks,
   festivalLight,
+  watering,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
@@ -159,9 +163,20 @@ canvas.addEventListener(
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(render);
 
+// Slow, ambient auto-orbit around the tree (paused while the user is dragging;
+// dragging just re-anchors it, so it carries on from wherever you let go).
+const AUTO_ORBIT_RATE = 0.022; // rad/s ≈ one lap every ~4.8 minutes
+let prevTime = 0;
+
 function render() {
   const time = clock.getElapsedTime();
+  const dt = Math.min(0.1, Math.max(0, time - prevTime));
+  prevTime = time;
+
+  if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
+
   currentMode.render(ctx, time);
+  watering.setTime(time); // animate the Water-action sprinkle burst
   music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
   tickFps();
 }
