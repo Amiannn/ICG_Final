@@ -212,8 +212,8 @@ export function buildWorld(scene) {
 
   // grass field (avoid water + tree base)
   const grass = makeGrass({
-    count: 18000,
-    area: 44,
+    count: 32000,
+    area: 58,
     exclude: [
       water.bounds,
       { minX: 0.6, maxX: 4.6, minZ: -0.8, maxZ: 3.2 }, // big cedar base

@@ -53,7 +53,8 @@ export const realtimeMode = {
 
     // campfire fades in only at night, and is doused by rain
     if (world.campfire) {
-      const nightF = settings.cycle ? (1 - lighting.dayness) : (settings.night ? 1 : 0);
+      const nightF =
+        settings.cycle || ctx.tod != null ? 1 - lighting.dayness : settings.night ? 1 : 0;
       world.campfire.update(time, nightF * (settings.rain ? 0 : 1));
     }
 
