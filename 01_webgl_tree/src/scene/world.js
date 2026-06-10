@@ -351,22 +351,29 @@ export function buildWorld(scene) {
   // whole hillsides, the pavilion, the campfire, tall boulders) are listed
   // separately: the festival gather sprint paths around only these, so the
   // small knee-high meadow rocks can't wall the herd into a dead-end pocket.
+  // Radii are CENTRE-TO-CENTRE clearances for COMPACT solids: footprint plus
+  // the largest animal's half-body (~0.95 at the cow's 1.3 scale), so a body
+  // standing at the legal rim can never visually overlap the obstacle — no cow
+  // in the campfire, no sheep clipped into a rock. Hills keep a slim margin
+  // instead: their skirts are near-flat turf, and a fat margin would seal the
+  // walkable corridors between them.
+  const BODY = 0.95;
   const majorObstacles = [
-    { x: 2.6, z: 1.2, r: 1.9 },   // cedar trunk + roots
-    { x: 6.9, z: -0.5, r: 1.2 },  // campfire
-    { x: -2, z: 6, r: 2.8 },      // the pavilion terrace
+    { x: 2.6, z: 1.2, r: 1.4 + BODY },   // cedar trunk + root flare
+    { x: 6.9, z: -0.5, r: 1.0 + BODY },  // campfire (logs + stone ring)
+    { x: -2, z: 6, r: 2.4 + BODY },      // the pavilion terrace
     // the pond (ellipse, incl. irregular rim + body margin) — animals never wade.
     // MUST track the Water() placement above: centre (4.4, 6.8), 7×5 + rim bumps.
-    { x: 4.4, z: 6.8, rx: 4.6, rz: 3.4 },
+    { x: 4.4, z: 6.8, rx: 4.2 + 0.6, rz: 3.0 + 0.6 },
     // every hill is solid ground — walk around, never through a slope (the
     // mid-distance hills matter too: the festival dismissal heads their way)
     ...hillPlacements.map(([x, z, w, , d]) => ({ x, z, rx: w + 0.3, rz: d + 0.3 })),
     ...midHills.map(([x, z, w, , d]) => ({ x, z, rx: w + 0.3, rz: d + 0.3 })),
-    ...bigRocks.map(([x, z, s]) => ({ x, z, r: s * 1.3 + 0.5 })),
+    ...bigRocks.map(([x, z, s]) => ({ x, z, r: s * 1.3 + BODY })),
   ];
   const obstacles = [
     ...majorObstacles,
-    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.5 })),
+    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.75 })),
   ];
 
   // wildlife — barnyard animals on the meadow + a flock of birds (shown only on

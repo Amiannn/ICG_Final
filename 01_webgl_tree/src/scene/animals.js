@@ -234,9 +234,10 @@ function findPath(sx, sz, tx, tz, list) {
 }
 
 // The animal pool — a few critters that take turns visiting (never all at once).
-// [type, scale]
+// [type, scale] — kept on the small side so they slip easily between the
+// rocks, the campfire and the tree without ever looking wedged.
 const POOL = [
-  ["cow", 1.6], ["sheep", 1.5], ["sheep", 1.45], ["dog", 1.4], ["cow", 1.55],
+  ["cow", 1.3], ["sheep", 1.2], ["sheep", 1.15], ["dog", 1.1], ["cow", 1.25],
 ];
 
 // per-type gait
@@ -657,10 +658,11 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
         a.group.scale.setScalar(a.baseScale * 1.3); // stand out for the show
         // A* route to the stage (guaranteed clear of every major obstacle)
         planTo(a, sx, sz, MAJOR);
-        // sprint pace sized so EVERYONE reaches the stage in ~4s, however far
-        // they start (and whatever the frame rate manages)
-        const d = Math.hypot(sx - a.group.position.x, sz - a.group.position.z);
-        a.hustle = Math.max(3.2, d / (4 * a.spd));
+        // sprint pace sized from the ACTUAL route length (detours included) so
+        // everyone reaches the stage in ~4.5s, whatever the way around
+        let len = 0, px = a.group.position.x, pz = a.group.position.z;
+        for (const w of a.route) { len += Math.hypot(w.x - px, w.z - pz); px = w.x; pz = w.z; }
+        a.hustle = Math.max(3.2, len / (4.5 * a.spd));
       });
     } else {
       anims.forEach((a) => {
@@ -751,6 +753,12 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           }
         }
       }
+      // final guarantee: nobody on the stage sits inside any major obstacle
+      for (const a of anims) {
+        if (!a.group.visible) continue;
+        const p = a.group.position;
+        [p.x, p.z] = resolveXZ(p.x, p.z, MAJOR);
+      }
       return;
     }
 
@@ -804,6 +812,7 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           api.onRoastStart?.(a.type); // fire flares (ember burst)
         }
       } else if (a.state === "roast") {
+        // (keels over at the legal standoff beside the flames — never in them)
         // cartoon send-off: keel over with a little hop, then shrink away
         a.roastT += dt;
         const TIP = 0.55, GONE = 1.6;
@@ -826,6 +835,15 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           }
         }
       }
+    }
+
+    // final guarantee, every frame: no visible animal — whatever its state —
+    // ever rests inside an obstacle's clearance (grazing beside the trunk,
+    // keeling over at the fire, anything)
+    for (const a of anims) {
+      if (!a.group.visible) continue;
+      const p = a.group.position;
+      [p.x, p.z] = resolveXZ(p.x, p.z);
     }
   }
 
