@@ -7,6 +7,7 @@ import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
+import { makeFireworks } from "./effects/fireworks.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
@@ -37,6 +38,15 @@ const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
 
+// Day-30 festival: fireworks + a pulsing point light that lights up the dancing
+// animals as each shell bursts (driven by game mode from the burst flash).
+const fireworks = makeFireworks();
+scene.add(fireworks.points);
+const festivalLight = new THREE.PointLight(0xffd9a0, 0, 60, 1.6);
+festivalLight.position.set(5, 17, 5);
+festivalLight.visible = false;
+scene.add(festivalLight);
+
 // Audio can only start after a user gesture (browser autoplay policy), so kick
 // the ambient music off on the first interaction if it's enabled.
 function startAudioOnce() {
@@ -60,6 +70,8 @@ const ctx = {
   dust,
   rainSplash,
   rainSound,
+  fireworks,
+  festivalLight,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day

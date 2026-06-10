@@ -68,6 +68,33 @@ export const gameMode = {
     this.waterPulse = 0;
     this.lastRain = null;
 
+    // Day-30 night festival (fireworks + dancing animals), set off by a hotkey.
+    this.festival = false;
+    this.festivalTimer = 0;
+    this._festivalDone = false;
+
+    // debug: jump to a time of day d (frac defaults to evening), force the show
+    window.__gameDay = (d, frac = 0.8) => {
+      this.dayFloat = (d - game.startDay) + Math.max(0, Math.min(0.999, frac));
+      this.lastDayInt = Math.floor(this.dayFloat);
+      setDay(game.startDay + this.lastDayInt);
+    };
+    window.__festival = () => this._startFestival(true);
+    window.__festMusic = () => (this.music ? { paused: this.music.paused, t: +this.music.currentTime.toFixed(2) } : null);
+
+    // festival music — plays ONLY while the animals dance on the night of Day 30
+    // (the player's track at public/festival_music.mp3).
+    this.music = new Audio(import.meta.env.BASE_URL + "festival_music.mp3");
+    this.music.loop = true;
+    this.music.volume = 0.8;
+    // unlock the audio element on the first user tap so it can auto-play at Day 30
+    this._prime = () => {
+      if (this.music) this.music.play().then(() => { this.music.pause(); this.music.currentTime = 0; }).catch(() => {});
+      window.removeEventListener("pointerdown", this._prime);
+      this._prime = null;
+    };
+    window.addEventListener("pointerdown", this._prime);
+
     setDay(game.startDay);
     this._apply(ctx);
   },
@@ -87,7 +114,9 @@ export const gameMode = {
     const dt = this.lastTime == null ? 0 : Math.max(0, Math.min(0.1, time - this.lastTime));
     this.lastTime = time;
 
-    this.dayFloat += dt / game.dayLengthSeconds;
+    // freeze the clock during the festival so it stays Day-30 night (no bleed
+    // into Day 31, no fireworks on Day 31); the clock resumes when it ends.
+    if (!this.festival) this.dayFloat += dt / game.dayLengthSeconds;
 
     const dayInt = Math.floor(this.dayFloat);
     if (dayInt > this.lastDayInt) {
@@ -95,8 +124,39 @@ export const gameMode = {
       setDay(game.startDay + dayInt);
     }
 
+    // Day 30, EVENING ONLY: the festival starts automatically once the day's
+    // fraction reaches nightfall (s ≥ 0.78). Checking the clock fraction — not
+    // lighting darkness — means dawn (also dark) can never set it off, so Day 30
+    // keeps its normal morning/noon/afternoon before the show.
+    const dayFrac = this.dayFloat - Math.floor(this.dayFloat);
+    if (!this.festival && !this._festivalDone && this._dayNumber() >= 30 && dayFrac >= 0.78 && !ctx.settings.rain) {
+      this._festivalDone = true;
+      this._startFestival();
+    }
+    if (this.festival) {
+      this.festivalTimer -= dt;
+      if (this.festivalTimer <= 0) this._endFestival();
+    }
+
     this._weather(ctx, dt);
     this._apply(ctx);
+
+    // fireworks + festival lighting: each burst flashes a point light over the
+    // dancing animals and a warm glow across the screen.
+    const fw = ctx.fireworks;
+    if (fw) {
+      fw.update(dt, time);
+      const f = fw.flash;
+      if (ctx.festivalLight) {
+        ctx.festivalLight.intensity = (fw.active ? 0.35 : 0) + f * 1.1;
+        ctx.festivalLight.color.copy(fw.flashColor);
+        ctx.festivalLight.visible = ctx.festivalLight.intensity > 0.02;
+      }
+      if (ctx.pipeline.composite.uniforms.uFlash) {
+        ctx.pipeline.composite.uniforms.uFlash.value.copy(fw.flashColor).multiplyScalar(Math.min(0.07, f * 0.045));
+      }
+    }
+    if (this.festival) this._updateBeat(dt); // drive the dancers from the music beat
 
     reflectTime(this.dayFloat - Math.floor(this.dayFloat));
     realtimeMode.render(ctx, time);
@@ -104,7 +164,8 @@ export const gameMode = {
 
   // push the current clock state onto the world (sun, growth, ecosystem)
   _apply(ctx) {
-    const s = this.dayFloat - Math.floor(this.dayFloat); // 0..1 within the day
+    let s = this.dayFloat - Math.floor(this.dayFloat); // 0..1 within the day
+    if (this.festival) s = 0.8; // hold a dramatic night for the whole fireworks show
     ctx.tod = (0.25 + s) % 1; // slider s (sunrise→…→night) → lighting tod (dawn≈0.25)
 
     const dayIndex = game.startDay - 1 + this.dayFloat;
@@ -115,6 +176,12 @@ export const gameMode = {
   },
 
   _weather(ctx, dt) {
+    // keep the Day-30 finale night clear so the festival always happens
+    if (this._dayNumber() >= 30) {
+      this.raining = false; this.waterPulse = 0;
+      if (this.lastRain) { ctx.setRain?.(false); this.lastRain = false; }
+      return;
+    }
     this.weatherTimer -= dt;
     if (this.weatherTimer <= 0) {
       this.raining = !this.raining;
@@ -143,12 +210,63 @@ export const gameMode = {
     else if (name === "bonemeal") this.dayFloat += 2;
   },
 
+  // ---- Day-30 night festival --------------------------------------------
+  _dayNumber() { return game.startDay + Math.floor(this.dayFloat); },
+
+  _startFestival(force) {
+    if (this.festival || !this.ctx) return;
+    if (force) { // debug: jump to the night of Day 30
+      this.dayFloat = Math.max(this.dayFloat, (30 - game.startDay) + 0.8);
+      this.lastDayInt = Math.floor(this.dayFloat);
+      setDay(game.startDay + this.lastDayInt);
+    }
+    this.festival = true;
+    this.festivalTimer = 28;
+    this.ctx.fireworks?.start(26);
+    this.ctx.world.animals?.party(true);
+    if (this.music) { this.music.currentTime = 0; this.music.play().catch(() => {}); }
+    notifyEvent("🎆", "Day 30 — the festival begins!");
+  },
+
+  // Beat from the music's PLAYBACK TIME on the track's measured grid — comb-
+  // filter analysis of festival_music.mp3 gives 115.25 BPM with the first beat
+  // at 0.228s (the 75/153 candidates are its ⅔/×4⁄3 aliases). Driving the dance
+  // from audio.currentTime keeps every count phase-locked to what you HEAR, and
+  // the exact beat index is passed along so the choreography can never drift.
+  // The music plays through a plain <audio> element, so it is never muted.
+  _updateBeat() {
+    const BPM = 115.25, OFFSET = 0.228; // measured from festival_music.mp3
+    let pulse = 0, step = 0;
+    if (this.music && !this.music.paused) {
+      const phase = (this.music.currentTime - OFFSET) * (BPM / 60);
+      step = Math.max(0, Math.floor(phase));
+      const frac = phase - Math.floor(phase);  // 0..1 within the beat
+      pulse = Math.max(0, 1 - frac * 3.0);      // sharp hit ON the beat, quick decay
+    }
+    const finale = this.festivalTimer <= 7;     // last stretch: everyone all-out
+    this.ctx.world.animals?.setBeat?.(0.85, pulse, step, finale);
+  },
+
+  _endFestival() {
+    this.festival = false;
+    this.ctx?.world.animals?.party(false);
+    this.ctx?.fireworks?.stop();
+    if (this.music) this.music.pause();
+  },
+
   // ---- teardown ----------------------------------------------------------
   dispose(ctx) {
     if (this.grower) {
       this.grower.dispose();
       this.grower = null;
     }
+    if (this.festival) this._endFestival();
+    if (this.music) { this.music.pause(); this.music.currentTime = 0; this.music = null; }
+    if (this._prime) { window.removeEventListener("pointerdown", this._prime); this._prime = null; }
+    if (ctx.festivalLight) { ctx.festivalLight.visible = false; ctx.festivalLight.intensity = 0; }
+    if (ctx.pipeline.composite.uniforms.uFlash) ctx.pipeline.composite.uniforms.uFlash.value.setRGB(0, 0, 0);
+    delete window.__festival;
+    delete window.__gameDay;
     if (this.lastRain) ctx.setRain?.(false);
     ctx.tod = null;
     ctx.growthReveal = null;

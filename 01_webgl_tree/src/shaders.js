@@ -191,6 +191,7 @@ export const compositeFragment = /* glsl */ `
   uniform float uGrain;
   uniform float uNight;
   uniform float uVignette;
+  uniform vec3 uFlash;        // fireworks burst flash (warm screen glow)
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -270,6 +271,10 @@ export const compositeFragment = /* glsl */ `
     // vignette
     float v = distance(vUv, vec2(0.5));
     color *= 1.0 - smoothstep(0.6, 1.0, v) * uVignette;
+
+    // fireworks burst flash — a warm screen-wide glow, stronger toward the sky
+    // (top of frame) where the shells bloom; pulses with each explosion.
+    color += uFlash * (0.7 + 0.6 * vUv.y);
 
     gl_FragColor = vec4(linearToSRGB(color), 1.0);
   }

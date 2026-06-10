@@ -98,6 +98,32 @@ const TURN_RATE = 3.0;     // max heading change (rad/s) → no snap-turns
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// solid obstacles (set by makeAnimals): the tree, rocks, campfire — circles
+// {x,z,r} — and the pond — an ellipse {x,z,rx,rz}. Animals walk AROUND all of
+// these; only grass is passable, so they still wander through tufts.
+let OBSTACLES = [];
+function resolveXZ(x, z) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const o of OBSTACLES) {
+      const dx = x - o.x, dz = z - o.z;
+      if (o.rx) { // ellipse (the pond): push out along the normalized direction
+        const d = Math.hypot(dx / o.rx, dz / o.rz);
+        if (d < 1) {
+          if (d < 1e-3) { x = o.x + o.rx; }
+          else { x = o.x + dx / d; z = o.z + dz / d; }
+        }
+      } else {
+        const d = Math.hypot(dx, dz);
+        if (d < o.r) {
+          if (d < 1e-3) { x = o.x + o.r; }
+          else { const k = o.r / d; x = o.x + dx * k; z = o.z + dz * k; }
+        }
+      }
+    }
+  }
+  return [x, z];
+}
+
 // The animal pool — a few critters that take turns visiting (never all at once).
 // [type, scale]
 const POOL = [
@@ -128,13 +154,15 @@ const GRAZE_MIN = 4, GRAZE_MAX = 9; // how long a visitor lingers, head down
 
 // Walk the animal toward (tx,tz); animate trot + heading. Returns true on arrival.
 function walk(a, tx, tz, dt, t) {
+  [tx, tz] = resolveXZ(tx, tz); // never aim into a rock / the tree
   const px = a.group.position.x, pz = a.group.position.z;
   const dx = tx - px, dz = tz - pz;
   const dist = Math.hypot(dx, dz);
   if (dist < 0.2) return true;
   const step = Math.min(dist, a.spd * dt);
-  a.group.position.x = px + (dx / dist) * step;
-  a.group.position.z = pz + (dz / dist) * step;
+  const [nx, nz] = resolveXZ(px + (dx / dist) * step, pz + (dz / dist) * step); // slide around obstacles
+  a.group.position.x = nx;
+  a.group.position.z = nz;
   a.group.position.y = Math.abs(Math.sin(t * a.stride + a.phase)) * 0.04; // gentle bob
 
   const want = Math.atan2(-dz, dx); // model faces +x at heading 0
@@ -156,7 +184,109 @@ function graze(a, t) {
   a.head.rotation.x = 0.72 + 0.08 * Math.sin(t * 6 + a.phase); // head down, nibbling
 }
 
-export function makeAnimals() {
+// ANTHROPOMORPHIC DANCE BATTLE — locked to the MUSIC'S BEAT GRID.
+//
+// game mode measures the track (115.25 BPM) and feeds us, every frame:
+//   • beat   — a sharp 0..1 pulse that SPIKES exactly on each beat and decays,
+//   • beatStep — the exact beat index (no drift), bars are groups of 4,
+//   • finale — true for the last stretch (everyone goes all-out).
+//
+// The animals rear up onto their hind legs (front legs become "arms") and battle
+// in a cypher around the pond stage: each dancer gets an 8-beat turn (2 bars).
+// The battler throws its own SIGNATURE power move — every count lands ON the
+// beat — while the crew faces the battler and bounces/claps in rhythm, hitting
+// the bar downbeat harder. In the finale everyone dances at battler intensity.
+let danceLevel = 0;   // 0..1 music energy
+let danceBeat = 0;    // 0..1 pulse, spikes exactly on each beat
+let beatStep = 0;     // exact beat index from the music grid
+let battleIdx = 0;    // who currently has the spotlight
+let danceFinale = false;
+
+const _approach = (cur, target, k) => cur + (target - cur) * Math.min(1, k);
+const _approachAngle = (cur, target, k) => {
+  let d = target - cur; d = Math.atan2(Math.sin(d), Math.cos(d));
+  return cur + d * Math.min(1, k);
+};
+
+// per-type signature move for the battler's showcase (so each battle differs)
+const SIGNATURE = { cow: "windmill", sheep: "bounce-spin", dog: "frenzy" };
+
+function dance(a, t, dt) {
+  const beat = danceBeat;                       // 1 exactly on the beat → decays
+  const bar = beatStep % 4;                     // 4-beat bar; 0 = downbeat
+  const turnBeat = beatStep % 8;                // position within a battler turn
+  const active = danceFinale || a.idx === battleIdx;
+  const amp = (danceFinale ? 1.15 : active ? 1 : 0.6) * (0.6 + 0.4 * danceLevel);
+  const downbeat = bar === 0 ? 1.35 : 1.0;      // hit the bar's first count harder
+  let hopY = 0;
+
+  // rear up onto the hind legs — upright, human-like; deeper on the beat
+  a.group.rotation.z = _approach(a.group.rotation.z, (active ? 1.35 : 1.05) - beat * 0.12, dt * 9);
+
+  // facing: battler works the crowd (camera), crew turns to watch the battler
+  if (active) {
+    const sig = SIGNATURE[a.type] || "windmill";
+    if (sig === "windmill" && turnBeat >= 2 && turnBeat <= 5) {
+      a.heading += dt * 8.6;                    // power spin: ~2 beats / revolution
+    } else if (sig === "frenzy") {
+      // quarter-turn SNAP on every beat (hits the grid), facing camera on bar end
+      const snap = FRONT_FACE + (beatStep % 4) * (Math.PI / 2);
+      a.heading = _approachAngle(a.heading, bar === 3 ? FRONT_FACE : snap, dt * 14);
+    } else {
+      a.heading = _approachAngle(a.heading, FRONT_FACE, dt * 8);
+    }
+  } else {
+    const s = FRONT_SLOTS[battleIdx % FRONT_SLOTS.length];
+    a.heading = _approachAngle(a.heading, Math.atan2(-(s.z - a.slot.z), s.x - a.slot.x), dt * 5);
+  }
+  a.group.rotation.y = a.heading;
+
+  // hold the slot (everyone dances in place on the shore arc — pond/tree/rocks
+  // are solid, and slots are already resolved onto open grass)
+  const [nx, nz] = resolveXZ(_approach(a.group.position.x, a.slot.x, dt * 3), _approach(a.group.position.z, a.slot.z, dt * 3));
+  a.group.position.x = nx; a.group.position.z = nz;
+
+  // ON-BEAT accents: jump lands exactly on the pulse; downbeat jumps higher;
+  // the battler's last turn-beat is a held FREEZE (no hop, tilted pose)
+  const freeze = active && !danceFinale && turnBeat === 7;
+  if (freeze) {
+    a.group.rotation.x = _approach(a.group.rotation.x, 0.7, dt * 16);
+    hopY = 0.04;
+  } else {
+    a.group.rotation.x = _approach(a.group.rotation.x, active ? Math.sin(beatStep * 0.9) * 0.18 : 0.06, dt * 10);
+    hopY = beat * (active ? 0.95 : 0.4) * amp * downbeat;
+  }
+
+  // arms (front legs) THROW UP on the beat — crew claps, battler bigger; back
+  // legs kick in antiphase. All driven by the same pulse → visibly in time.
+  let j = 0;
+  for (const hip of a.legs) {
+    if (j >= 2) hip.rotation.x = -1.5 + beat * (active ? 1.8 : 1.0) * downbeat + Math.sin(beatStep * 2.1 + j) * 0.15;
+    else hip.rotation.x = beat * (j === 0 ? 1 : -1) * (active ? 1.5 : 0.7) * downbeat;
+    j++;
+  }
+  a.head.rotation.x = -0.12 + beat * 0.55 * downbeat;
+
+  // lift the body so the rear-up / freeze tilt never sinks it through the ground
+  const gs = a.group.scale.x || 1;
+  const lift = Math.sin(Math.max(0, a.group.rotation.z)) * 0.6 * gs
+             + Math.abs(Math.sin(a.group.rotation.x)) * 0.35 * gs;
+  a.group.position.y = hopY + lift;
+}
+
+// Dance stage: an ARC hugging the pond's near-left SHORE (the only open meadow
+// band visible above the HUD with this camera). Slots are parametric points just
+// outside the pond ellipse (centre 6.0,4.4 / rim ~5.9×4.4) with a standoff, so
+// every dancer stands on GRASS — never in the water, the tree, or a rock (slots
+// are also passed through resolveXZ when the party starts).
+const FRONT_FACE = Math.atan2(-1, 1); // heading that faces the camera (+x,+z)
+const FRONT_SLOTS = [135, 160, 185, 210, 235].map((deg) => {
+  const a = (deg * Math.PI) / 180;
+  return { x: 6.0 + 7.2 * Math.cos(a), z: 4.4 + 5.6 * Math.sin(a) };
+});
+
+export function makeAnimals(obstacles = []) {
+  OBSTACLES = obstacles;
   const group = new THREE.Group();
   const anims = [];
   POOL.forEach(([type, sc], i) => {
@@ -166,7 +296,7 @@ export function makeAnimals() {
     group.add(a.group);
     const tr = TRAITS[type];
     anims.push({
-      ...a, type,
+      ...a, type, baseScale: sc,
       spd: tr.spd, stride: tr.stride, strideAmp: tr.amp,
       phase: i * 1.7,
       state: "idle",    // idle → enter → graze → leave → idle
@@ -179,6 +309,43 @@ export function makeAnimals() {
 
   let lastT = null;
   let gap = rand(2, 6); // first visitor wanders in a few seconds after load
+  let party = false;
+
+  // Festival! Every animal gathers to the front row and breakdances. Overrides
+  // the normal visit logic until turned off (then they disperse off-screen).
+  function setParty(on) {
+    party = !!on;
+    if (on) {
+      beatStep = 0; battleIdx = 0;
+      anims.forEach((a, i) => {
+        const sl = FRONT_SLOTS[i % FRONT_SLOTS.length];
+        const [sx, sz] = resolveXZ(sl.x, sl.z);      // keep dance slots out of rocks/tree
+        a.slot = { x: sx, z: sz };
+        a.idx = i;                                   // place in the battle order
+        a.state = "gather";
+        a.group.visible = true;
+        a.group.scale.setScalar(a.baseScale * 1.3); // stand out for the show
+      });
+    } else {
+      anims.forEach((a) => {
+        a.group.rotation.z = 0;
+        a.group.rotation.x = 0;
+        a.group.scale.setScalar(a.baseScale);
+        a.state = "leave";
+        a.path = { exit: [-14, a.group.position.z] };
+      });
+    }
+  }
+
+  // beat from the festival music — pulse + the EXACT beat index from the track's
+  // measured grid (115.25 BPM), so the choreography can never drift off-rhythm.
+  function setBeat(level, beat, step = beatStep, finale = false) {
+    danceLevel = level;
+    danceBeat = beat;
+    beatStep = step;
+    danceFinale = finale;
+    battleIdx = Math.floor(step / 8) % anims.length; // spotlight passes every 2 bars
+  }
 
   // Send 1 (usually) or 2 idle animals on a visit along distinct paths.
   function startVisit() {
@@ -204,6 +371,33 @@ export function makeAnimals() {
   function update(t, active = true) {
     const dt = lastT == null ? 0 : Math.min(0.05, Math.max(0, t - lastT));
     lastT = t;
+
+    // festival: all animals gather to the shore stage, then dance-battle
+    if (party) {
+      for (const a of anims) {
+        a.group.visible = true;
+        if (a.state === "dance") {
+          dance(a, t, dt);
+        } else if (walk(a, a.slot.x, a.slot.z, dt, t)) { // gather → arrive
+          a.state = "dance";
+          a.heading = FRONT_FACE;
+        }
+      }
+      // animals are solid too: pairwise push-apart so dancers never overlap
+      for (let i = 0; i < anims.length; i++) {
+        for (let k = i + 1; k < anims.length; k++) {
+          const A = anims[i].group.position, B = anims[k].group.position;
+          const dx = B.x - A.x, dz = B.z - A.z;
+          const d = Math.hypot(dx, dz), min = 2.1;
+          if (d < min && d > 1e-4) {
+            const push = (min - d) * 0.5, ux = dx / d, uz = dz / d;
+            [A.x, A.z] = resolveXZ(A.x - ux * push, A.z - uz * push);
+            [B.x, B.z] = resolveXZ(B.x + ux * push, B.z + uz * push);
+          }
+        }
+      }
+      return;
+    }
 
     if (active) {
       gap -= dt;
@@ -236,5 +430,5 @@ export function makeAnimals() {
     }
   }
 
-  return { group, update };
+  return { group, update, party: setParty, setBeat };
 }

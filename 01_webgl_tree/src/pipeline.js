@@ -97,6 +97,7 @@ export class Pipeline {
         uGrain: { value: 1 },
         uNight: { value: 0 },
         uVignette: { value: 0.6 },
+        uFlash: { value: new THREE.Color(0, 0, 0) },
       },
     });
 

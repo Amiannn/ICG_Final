@@ -223,9 +223,21 @@ export function buildWorld(scene) {
   scene.add(grass);
   const grassTotal = grass.count; // full blade count (revealed progressively)
 
+  // solid obstacles the animals must walk AROUND (they may pass through grass,
+  // but not the trunk, rocks or campfire). Each is a circle {x, z, r} on the
+  // ground; r includes a margin for the animal's body.
+  const obstacles = [
+    { x: 2.6, z: 1.2, r: 1.9 },   // cedar trunk + roots
+    { x: 6.9, z: -0.5, r: 1.2 },  // campfire
+    // the pond (ellipse, incl. irregular rim + body margin) — animals never wade
+    { x: 6.0, z: 4.4, rx: 6.4, rz: 4.9 },
+    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.5 })),
+    ...bigRocks.map(([x, z, s]) => ({ x, z, r: s * 1.3 + 0.5 })),
+  ];
+
   // wildlife — barnyard animals on the meadow + a flock of birds (shown only on
   // clear sunny days; the main loop hides them at night and in the rain)
-  const animals = makeAnimals();
+  const animals = makeAnimals(obstacles);
   scene.add(animals.group);
   const birds = makeBirds();
   scene.add(birds.group);
