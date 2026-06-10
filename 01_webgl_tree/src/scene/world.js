@@ -79,6 +79,21 @@ export function buildWorld(scene) {
   // rather than placed polyhedra.
   scene.add(makeMountainRing());
 
+  // below-the-horizon skirt — the camera looks slightly downward, so the
+  // lowest screen rows aim *under* the ground plane and would show bare sky.
+  // An inward-facing cylinder of fog-shaded meadow green catches those rays,
+  // so the bottom of the frame reads as the land falling away into the mist
+  // (and it surrounds the scene, so it works at every orbit angle).
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(34, 34, 60, 28, 1, true),
+    toonMaterial(0x6f8a52),
+  );
+  skirt.material.side = THREE.BackSide;
+  skirt.position.y = -30; // top edge meets the ground plane at y = 0
+  skirt.userData.noReflect = true;
+  skirt.userData.skipNormal = true; // keep it out of the outline pass
+  scene.add(skirt);
+
   // water — a large foreground lake. With the iso/orthographic camera a tall
   // tree's mirror image streaks far toward the camera (along world x−z ≈ const),
   // so the lake must be big and reach forward to actually catch the trunk+canopy
