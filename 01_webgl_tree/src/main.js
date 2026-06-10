@@ -47,7 +47,7 @@ scene.add(watering.group); // droplets + local ground ripples
 const fireworks = makeFireworks();
 scene.add(fireworks.points);
 const festivalLight = new THREE.PointLight(0xffd9a0, 0, 60, 1.6);
-festivalLight.position.set(5, 17, 5);
+festivalLight.position.set(13, 13, 0); // high between the tree and the front-row stage
 festivalLight.visible = false;
 scene.add(festivalLight);
 
@@ -88,6 +88,7 @@ const interact = makeInteractions(ctx);
 ctx.interact = interact;
 scene.add(interact.leaves);
 window.__interact = interact; // dev hook (like __mode / __tod)
+window.__animals = () => world.animals?.debug?.(); // dev hook: dancer states
 
 // One place to switch rain on/off with all its effects (lighting overcast,
 // ambience, pond ripples, ground splash, screen streaks). Game weather + the
@@ -209,7 +210,8 @@ function render() {
 
   currentMode.render(ctx, time);
   watering.setTime(time); // animate the Water-action sprinkle burst
-  music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
+  // day/night cross-fade; silent in rain (rain sound only) and under the festival show
+  music.setDayness(lighting.dayness, settings.rain || !!ctx.festivalActive);
   tickFps();
 }
 

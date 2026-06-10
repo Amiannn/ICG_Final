@@ -5,6 +5,7 @@ import { makeGrass, makePatchGrass } from "./grass.js";
 import { Water } from "./water.js";
 import { makeAnimals } from "./animals.js";
 import { makeBirds } from "../effects/birds.js";
+import { makeButterflies } from "../effects/butterflies.js";
 import { makeCampfire } from "./campfire.js";
 
 // Builds the whole diorama and returns handles the main loop needs.
@@ -213,8 +214,9 @@ export function buildWorld(scene) {
     }
   };
   for (const [x, z, s] of bigRocks) domeTufts(x, s * 0.45, z, s * 1.1, s * 0.6, s * 0.95, 10);
-  for (const [x, z, w, h, d] of hillPlacements) domeTufts(x, h * 0.3, z, w, h, d, 22);
-  for (const [x, z, w, h, d] of midHills) domeTufts(x, h * 0.3, z, w, h, d, 16);
+  // hillsides CARPETED in grass + wildflowers (the butterflies graze these)
+  for (const [x, z, w, h, d] of hillPlacements) domeTufts(x, h * 0.3, z, w, h, d, 46);
+  for (const [x, z, w, h, d] of midHills) domeTufts(x, h * 0.3, z, w, h, d, 26);
   const patchGrass = makePatchGrass(grassSpots);
   patchGrass.userData.noReflect = true;
   scene.add(patchGrass);
@@ -231,9 +233,15 @@ export function buildWorld(scene) {
     }
   };
   bigRocks.forEach(([x, z, s], i) => perch(x, s * 0.45, z, s * 1.0, s * 0.55, s * 0.85, 2, i));
-  hillPlacements.forEach(([x, z, w, h, d], i) => perch(x, h * 0.3, z, w * 0.8, h, d * 0.8, 3, i));
+  hillPlacements.forEach(([x, z, w, h, d], i) => perch(x, h * 0.3, z, w * 0.8, h, d * 0.8, 14, i));
+  midHills.forEach(([x, z, w, h, d], i) => perch(x, h * 0.3, z, w * 0.75, h, d * 0.75, 6, i));
 
   scene.add(flowers);
+
+  // butterflies touring the blooms for nectar (daytime + clear weather only)
+  const flowerSpots = flowerList.map((f) => ({ x: f.position.x, y: f.position.y + 0.38, z: f.position.z }));
+  const butterflies = makeButterflies(flowerSpots);
+  scene.add(butterflies.group);
 
   // grass field (avoid water + tree base)
   const grass = makeGrass({
@@ -248,21 +256,40 @@ export function buildWorld(scene) {
   scene.add(grass);
   const grassTotal = grass.count; // full blade count (revealed progressively)
 
+  // a lakeside pavilion on the flat meadow beyond the pond's far-left shore —
+  // the classical 古色古香 viewing spot over the water
+  const pavilion = makePavilion(toonMaterial);
+  pavilion.position.set(-2, 0, 6);
+  pavilion.rotation.y = 0.4; // door bay toward the pond / camera
+  scene.add(pavilion);
+
   // solid obstacles the animals must walk AROUND (they may pass through grass,
-  // but not the trunk, rocks or campfire). Each is a circle {x, z, r} on the
-  // ground; r includes a margin for the animal's body.
-  const obstacles = [
+  // but not the trunk, rocks, campfire, pavilion or hills). Circles {x, z, r}
+  // or ellipses {x, z, rx, rz} on the ground, incl. a body margin.
+  //
+  // MAJOR obstacles (things an animal must NEVER overlap: the trunk, the pond,
+  // whole hillsides, the pavilion, the campfire, tall boulders) are listed
+  // separately: the festival gather sprint paths around only these, so the
+  // small knee-high meadow rocks can't wall the herd into a dead-end pocket.
+  const majorObstacles = [
     { x: 2.6, z: 1.2, r: 1.9 },   // cedar trunk + roots
     { x: 6.9, z: -0.5, r: 1.2 },  // campfire
-    // the pond (ellipse, incl. irregular rim + body margin) — animals never wade
-    { x: 6.0, z: 4.4, rx: 6.4, rz: 4.9 },
-    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.5 })),
+    { x: -2, z: 6, r: 2.8 },      // the pavilion terrace
+    // the pond (ellipse, incl. irregular rim + body margin) — animals never wade.
+    // MUST track the Water() placement above: centre (4.4, 6.8), 7×5 + rim bumps.
+    { x: 4.4, z: 6.8, rx: 4.6, rz: 3.4 },
+    // the close hills are solid ground — walk around, never through the slope
+    ...hillPlacements.map(([x, z, w, , d]) => ({ x, z, rx: w + 0.3, rz: d + 0.3 })),
     ...bigRocks.map(([x, z, s]) => ({ x, z, r: s * 1.3 + 0.5 })),
+  ];
+  const obstacles = [
+    ...majorObstacles,
+    ...rockPlacements.map(([x, z, s]) => ({ x, z, r: s * 1.35 + 0.5 })),
   ];
 
   // wildlife — barnyard animals on the meadow + a flock of birds (shown only on
   // clear sunny days; the main loop hides them at night and in the rain)
-  const animals = makeAnimals(obstacles);
+  const animals = makeAnimals(obstacles, majorObstacles);
   scene.add(animals.group);
   const birds = makeBirds();
   scene.add(birds.group);
@@ -286,7 +313,7 @@ export function buildWorld(scene) {
     }
   }
 
-  return { water, tree, grass, ground, animals, birds, flowers, campfire, setGroundReveal };
+  return { water, tree, grass, ground, animals, birds, butterflies, flowers, campfire, setGroundReveal };
 }
 
 const _ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -347,6 +374,56 @@ function makeMountainRing() {
   const mesh = new THREE.Mesh(geo, toonMaterial(0xffffff, { vertexColors: true }));
   mesh.receiveShadow = true;
   return mesh;
+}
+
+// A classical Chinese pavilion (涼亭) — low-poly and cel-shaded to match the
+// diorama: a two-step hexagonal stone terrace, six cinnabar columns with a
+// lintel ring and waist railings, a two-tier glazed-tile roof with upturned
+// eave tips at each corner, and a small gilt finial on top.
+function makePavilion(toon) {
+  const g = new THREE.Group();
+  const stone = toon(0xb9b4a4);
+  const wood = toon(0x8d3b2c);     // aged cinnabar
+  const woodDark = toon(0x5f2a20);
+  const tile = toon(0x4f6258);     // glazed grey-green tiles
+  const gold = toon(0xd8b14a);
+  const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh); return mesh; };
+
+  // two-step stone terrace
+  add(new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.45, 0.16, 6), stone), 0, 0.08, 0);
+  add(new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.15, 0.14, 6), stone), 0, 0.23, 0);
+
+  // six columns + lintel ring + waist railings (one bay left open as the door)
+  const R = 1.5;
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 1.55, 6), wood),
+        Math.cos(a) * R, 1.05, Math.sin(a) * R);
+    const a2 = ((k + 1) / 6) * Math.PI * 2 + Math.PI / 6;
+    const mx = (Math.cos(a) + Math.cos(a2)) * 0.5 * R, mz = (Math.sin(a) + Math.sin(a2)) * 0.5 * R;
+    const len = 2 * R * Math.sin(Math.PI / 6);
+    const lintel = add(new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.12), woodDark), mx, 1.86, mz);
+    lintel.rotation.y = -((a + a2) / 2) + Math.PI / 2;
+    if (k !== 4) { // k=4 faces the camera-ish — leave it open as the entrance
+      const rail = add(new THREE.Mesh(new THREE.BoxGeometry(len * 0.92, 0.3, 0.06), wood), mx, 0.55, mz);
+      rail.rotation.y = lintel.rotation.y;
+    }
+  }
+
+  // two-tier roof with upturned eave tips, then the gilt finial
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 2.62, 0.92, 6), tile), 0, 2.42, 0);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
+    const tip = add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.22), tile),
+        Math.cos(a) * 2.52, 2.06, Math.sin(a) * 2.52);
+    tip.rotation.y = -a;
+    tip.rotation.z = 0.55; // the upswept corner
+  }
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 1.5, 0.66, 6), tile), 0, 3.18, 0);
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.18, 6), woodDark), 0, 3.56, 0);
+  add(new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), gold), 0, 3.76, 0);
+
+  return g;
 }
 
 // A flat sand collar following the pond's irregular rim. It sits just under

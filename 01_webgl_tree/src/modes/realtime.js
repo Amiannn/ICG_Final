@@ -84,6 +84,7 @@ export const realtimeMode = {
       world.birds.group.visible = true;
       world.birds.update(time, sunny, reveal);
     }
+    if (world.butterflies) world.butterflies.update(time, sunny); // nectar rounds
 
     pipeline.render(ctx.scene, lighting.sun, time, (r, cam) => {
       world.water.updateReflection(r, cam, ctx.scene);

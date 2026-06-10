@@ -154,7 +154,16 @@ export const gameMode = {
     }
     if (this.festival) {
       this.festivalTimer -= dt;
+      // the last beats: everyone snaps into a held HERO POSE under the finale
+      if (this.festivalTimer <= 2.8 && !this._posed) {
+        this._posed = true;
+        ctx.world.animals?.endPose?.();
+      }
       if (this.festivalTimer <= 0) this._endFestival();
+      // ease the camera back to the default framing for the show, so the front-
+      // row stage faces the screen (out-pulls the slow ambient auto-orbit)
+      const yaw = ctx.pixel.yaw;
+      ctx.pixel.setYaw(yaw + (0.85 - yaw) * Math.min(1, dt * 1.5));
     }
 
     this._weather(ctx, dt);
@@ -265,7 +274,9 @@ export const gameMode = {
       setDay(game.startDay + this.lastDayInt);
     }
     this.festival = true;
+    this.ctx.festivalActive = true; // main.js ducks the ambient under the show
     this.festivalTimer = 28;
+    this._posed = false;
     this.ctx.fireworks?.start(26);
     this.ctx.world.animals?.party(true);
     if (this.music) { this.music.currentTime = 0; this.music.play().catch(() => {}); }
@@ -293,6 +304,7 @@ export const gameMode = {
 
   _endFestival() {
     this.festival = false;
+    if (this.ctx) this.ctx.festivalActive = false;
     this.ctx?.world.animals?.party(false);
     this.ctx?.fireworks?.stop();
     if (this.music) this.music.pause();
