@@ -11,7 +11,7 @@ import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeFireworks } from "./effects/fireworks.js";
 import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
-import { initUI, tickFps } from "./ui.js";
+import { initUI, tickFps, playScoop } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
 import { gameMode } from "./modes/game.js";
 import { growthMode } from "../../02_tree_growth/src/growth.js";
@@ -165,7 +165,13 @@ const endDrag = (e, mayTap = false) => {
     const r = canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
-    window.__lastTap = interact.tap(nx, ny, clock.getElapsedTime()); // dev hook
+    const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
+    window.__lastTap = hit; // dev hook
+    // tapping the pond also scoops a water charge (game mode): the can
+    // animation flies to the button, then the charge lands
+    if (hit === "water" && currentMode.collectWater) {
+      playScoop(e.clientX, e.clientY, () => currentMode.collectWater?.());
+    }
   }
 };
 canvas.addEventListener("pointerup", (e) => endDrag(e, true));

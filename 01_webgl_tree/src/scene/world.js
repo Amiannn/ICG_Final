@@ -267,11 +267,11 @@ export function buildWorld(scene) {
   const birds = makeBirds();
   scene.add(birds.group);
 
-  // small campfire just south of the pond's near shore — flame only lights up
-  // at night. Positioned to clear the rocks at (5.6, …, 0.6) and (6.8, …, -2.6)
-  // and stay outside the tree-base exclusion.
+  // small campfire on the pond's left shore (screen-left of the tree under the
+  // default yaw) — flame only lights up at night. Sits just outside the pond's
+  // x-edge (x=1) and clear of the animal graze spots + scattered rocks.
   const campfire = makeCampfire();
-  campfire.group.position.set(6.9, 0, -0.5);
+  campfire.group.position.set(0.6, 0, 4.4);
   scene.add(campfire.group);
 
   // Ecosystem grows with the tree: reveal grass blades (by instance count) and

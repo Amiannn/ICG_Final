@@ -15,7 +15,7 @@ import * as THREE from "three";
 export class PixelCamera {
   constructor() {
     this.camera = new THREE.OrthographicCamera(-8, 8, 4.5, -4.5, 0.1, 100);
-    this.viewHeight = 30; // world units visible vertically (pulled back, but the ground still fills the lower frame)
+    this.viewHeight = 36; // world units visible vertically (fits the full cedar + pond above the HUD)
     // target height frames the scene high on the phone screen, so the pond in
     // the foreground stays above (not behind) the bottom HUD cluster
     this.target = new THREE.Vector3(1.8, 2.8, 1.0);
@@ -30,7 +30,7 @@ export class PixelCamera {
     this.desiredTarget = this.target.clone();
     this.desiredPosition = this.target.clone().add(this.eyeOffset);
     // default framing: yawed so the pond sits at the lower-left of the tree
-    this.setYaw(0.85);
+    this.setYaw(0.0);
 
     this.snapEnabled = true;
     this.resolutionY = 270;

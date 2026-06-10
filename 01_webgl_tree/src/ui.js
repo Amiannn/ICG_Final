@@ -142,6 +142,9 @@ function initActions(onAction) {
   document.querySelectorAll(".action").forEach((btn) => {
     btn.addEventListener("click", () => {
       const name = btn.dataset.action;
+      // let the game veto first (e.g. out of water) — it shows its own toast
+      if (onAction?.(name) === false) return;
+
       btn.classList.remove("pulse");
       void btn.offsetWidth; // restart animation
       btn.classList.add("pulse");
@@ -149,9 +152,57 @@ function initActions(onAction) {
       const info = ACTION_INFO[name];
       logEvent(info.icon, info.text);
       showNotify(info.icon, info.text);
-      onAction?.(name);
     });
   });
+}
+
+// water inventory readout on the Water button (badge + greyed-out icon at 0)
+let _lastWater = null;
+export function setWaterCount(n) {
+  const el = $("#water-count");
+  if (el) {
+    el.textContent = n;
+    if (_lastWater != null && n > _lastWater) {
+      el.classList.remove("bump");
+      void el.offsetWidth;
+      el.classList.add("bump");
+    }
+  }
+  _lastWater = n;
+  const btn = document.querySelector('.action[data-action="water"]');
+  if (btn) btn.classList.toggle("empty", n <= 0);
+}
+
+// Pond-scoop animation: the watering can pops up at the tap point, dips to
+// scoop (with a ripple ring), then flies to the Water button. `onDone` fires
+// when it lands — the moment to actually grant the charge.
+export function playScoop(clientX, clientY, onDone) {
+  const app = document.querySelector("#app");
+  const rect = app.getBoundingClientRect();
+  const wrap = document.createElement("div");
+  wrap.className = "scoop-anim";
+  wrap.style.left = `${clientX - rect.left}px`;
+  wrap.style.top = `${clientY - rect.top}px`;
+  wrap.innerHTML =
+    `<span class="scoop-ring"></span>` +
+    `<img class="scoop-can" src="./icons/icon_water.png" alt="" />`;
+  app.appendChild(wrap);
+
+  // after the dip, fly the can to the Water button's badge
+  const badge = $("#water-count");
+  const b = badge ? badge.getBoundingClientRect() : { left: clientX, top: clientY, width: 0, height: 0 };
+  const tx = b.left + b.width / 2 - clientX;
+  const ty = b.top + b.height / 2 - clientY;
+  setTimeout(() => {
+    const can = wrap.querySelector(".scoop-can");
+    can.style.transition = "transform 0.5s cubic-bezier(0.45, -0.15, 0.8, 0.6), opacity 0.5s ease";
+    can.style.transform = `translate(${tx}px, ${ty}px) scale(0.22)`;
+    can.style.opacity = "0.2";
+  }, 540);
+  setTimeout(() => {
+    wrap.remove();
+    onDone?.();
+  }, 1080);
 }
 
 // ---- journal + notification pill ------------------------------------------
