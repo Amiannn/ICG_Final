@@ -6,6 +6,7 @@ import { buildWorld } from "./scene/world.js";
 import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
+import { makeWatering } from "./effects/watering.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
@@ -36,6 +37,8 @@ const rainSound = makeRainSound();
 const music = makeAmbientMusic();
 const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
+const watering = makeWatering();
+scene.add(watering.group); // droplets + local ground ripples
 
 // Audio can only start after a user gesture (browser autoplay policy), so kick
 // the ambient music off on the first interaction if it's enabled.
@@ -60,6 +63,7 @@ const ctx = {
   dust,
   rainSplash,
   rainSound,
+  watering,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
@@ -160,6 +164,7 @@ function render() {
   if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
 
   currentMode.render(ctx, time);
+  watering.setTime(time); // animate the Water-action sprinkle burst
   music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
   tickFps();
 }
