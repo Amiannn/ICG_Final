@@ -68,6 +68,19 @@ export const gameMode = {
     this.waterPulse = 0;
     this.lastRain = null;
 
+    // toast + journal whenever a wild visitor strolls in
+    const VISIT = {
+      cow: ["🐄", "A cow wandered over!"],
+      sheep: ["🐑", "A little sheep visited!"],
+      dog: ["🐶", "A dog trotted by!"],
+    };
+    if (ctx.world.animals) {
+      ctx.world.animals.onVisit = (type) => {
+        const [icon, text] = VISIT[type] || ["🐾", "A visitor arrived!"];
+        notifyEvent(icon, text);
+      };
+    }
+
     setDay(game.startDay);
     this._apply(ctx);
   },
@@ -149,6 +162,7 @@ export const gameMode = {
       this.grower.dispose();
       this.grower = null;
     }
+    if (ctx.world.animals) ctx.world.animals.onVisit = null;
     if (this.lastRain) ctx.setRain?.(false);
     ctx.tod = null;
     ctx.growthReveal = null;
