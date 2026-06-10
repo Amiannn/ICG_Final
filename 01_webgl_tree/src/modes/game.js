@@ -187,6 +187,12 @@ export const gameMode = {
     notifyEvent("💧", "Fetched water from the pond! (+1)");
   },
 
+  // fixed close-up framing (the camera does NOT pull back as the tree grows —
+  // zoom out with the wheel to see the full cedar)
+  viewBase() {
+    return 20;
+  },
+
   // ---- teardown ----------------------------------------------------------
   dispose(ctx) {
     if (this.grower) {

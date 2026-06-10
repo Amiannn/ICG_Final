@@ -166,16 +166,17 @@ canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
-// Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
-// visible world height; resize() re-derives the frustum + render targets.
-const ZOOM_MIN = 14, ZOOM_MAX = 46;
+// Mouse-wheel zoom — a FACTOR multiplied onto the mode's base view height
+// (game mode's base follows the tree's growth: close on the sprout, pulled
+// back for the full cedar). The camera is orthographic, so zoom = scaling
+// the visible world height.
+const BASE_VIEW = 36; // modes without a viewBase() (realtime/growth/morph)
+let zoomFactor = 1;
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const factor = Math.exp(e.deltaY * 0.0012); // smooth exponential zoom
-    pixel.viewHeight = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pixel.viewHeight * factor));
-    resize();
+    zoomFactor = Math.min(2.2, Math.max(0.45, zoomFactor * Math.exp(e.deltaY * 0.0012)));
   },
   { passive: false },
 );
@@ -194,6 +195,14 @@ function render() {
   prevTime = time;
 
   if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
+
+  // ease the zoom toward base × wheel factor (base grows with the tree)
+  const base = currentMode.viewBase ? currentMode.viewBase() : BASE_VIEW;
+  const want = Math.min(50, Math.max(12, base * zoomFactor));
+  if (Math.abs(want - pixel.viewHeight) > 0.005) {
+    pixel.viewHeight += (want - pixel.viewHeight) * Math.min(1, dt * 4);
+    resize();
+  }
 
   currentMode.render(ctx, time);
   watering.setTime(time); // animate the Water-action sprinkle burst
