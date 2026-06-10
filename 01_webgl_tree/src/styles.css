@@ -195,12 +195,19 @@ body {
   align-items: center;
 }
 
-/* deer / event notification */
+/* deer / event notification — floats under the top bar (not in the bottom
+   cluster) so it never covers the pond or other tappable scenery */
 .notify {
+  position: absolute;
+  top: 132px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 56px);
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 0 18px;
+  margin: 0;
   padding: 13px 20px;
   border: none;
   border-radius: 16px;
@@ -215,7 +222,7 @@ body {
 }
 .notify.hidden {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateX(-50%) translateY(-8px);
   pointer-events: none;
 }
 .notify-icon {

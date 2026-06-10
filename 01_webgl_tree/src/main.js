@@ -8,6 +8,7 @@ import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
+import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps, playScoop } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
@@ -67,7 +68,14 @@ const ctx = {
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
+  activeTreeGroup: world.tree, // whichever tree the player can poke (game mode swaps it)
 };
+
+// touch interactions: tap the pond/tree, flick for a wind gust
+const interact = makeInteractions(ctx);
+ctx.interact = interact;
+scene.add(interact.leaves);
+window.__interact = interact; // dev hook (like __mode / __tod)
 
 // One place to switch rain on/off with all its effects (lighting overcast,
 // ambience, pond ripples, ground splash, screen streaks). Game weather + the
@@ -104,65 +112,59 @@ window.addEventListener("resize", resize);
 new ResizeObserver(resize).observe(canvas);
 resize();
 
-// Horizontal mouse-drag yaw. Click + drag left/right on the canvas to orbit
-// the camera around the cedar; vertical motion is intentionally ignored.
+// Pointer gestures on the canvas:
+//   • drag left/right — orbit (yaw) around the cedar (vertical motion ignored)
+//   • a tap           — poke the scene (pond ripple / tree shake), see interact.js
 canvas.style.cursor = "grab";
 let dragging = false;
 let lastX = 0;
-let downX = 0, downY = 0, downT = 0; // to tell a tap from a drag
+let lastY = 0;
+let moved = 0; // accumulated pointer travel (px) to tell taps from drags
 const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
+const TAP_SLOP_PX = 8;
+const TAP_MAX_MS = 350;
+let downT = 0;
 canvas.addEventListener("pointerdown", (e) => {
   dragging = true;
   lastX = e.clientX;
-  downX = e.clientX;
-  downY = e.clientY;
+  lastY = e.clientY;
   downT = performance.now();
+  moved = 0;
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
 });
 canvas.addEventListener("pointermove", (e) => {
   if (!dragging) return;
   const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
   lastX = e.clientX;
+  lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(dy);
   pixel.setYaw(pixel.yaw - dx * YAW_SENSITIVITY);
 });
-const endDrag = (e) => {
+const endDrag = (e, mayTap = false) => {
   if (!dragging) return;
   dragging = false;
   if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
     canvas.releasePointerCapture(e.pointerId);
   }
   canvas.style.cursor = "grab";
-  // a short, stationary press is a TAP — check if it landed on the pond
-  if (
-    e && e.clientX != null &&
-    Math.hypot(e.clientX - downX, e.clientY - downY) < 7 &&
-    performance.now() - downT < 450
-  ) {
-    tryPondTap(e);
+  if (mayTap && moved < TAP_SLOP_PX && performance.now() - downT < TAP_MAX_MS) {
+    const r = canvas.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
+    const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
+    window.__lastTap = hit; // dev hook
+    // tapping the pond also scoops a water charge (game mode): the can
+    // animation flies to the button, then the charge lands
+    if (hit === "water" && currentMode.collectWater) {
+      playScoop(e.clientX, e.clientY, () => currentMode.collectWater?.());
+    }
   }
 };
-canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
-
-// Tap the pond to scoop water (game mode's water resource). Raycast the tap
-// through the ortho camera against the pond surface only.
-const _pondRay = new THREE.Raycaster();
-const _pondNdc = new THREE.Vector2();
-function tryPondTap(e) {
-  if (!currentMode.collectWater) return; // only the game collects water
-  const r = canvas.getBoundingClientRect();
-  _pondNdc.set(
-    ((e.clientX - r.left) / r.width) * 2 - 1,
-    -((e.clientY - r.top) / r.height) * 2 + 1,
-  );
-  _pondRay.setFromCamera(_pondNdc, pixel.camera);
-  if (_pondRay.intersectObject(world.water.mesh, false).length) {
-    // scoop animation first; the charge lands when the can reaches the button
-    playScoop(e.clientX, e.clientY, () => currentMode.collectWater?.());
-  }
-}
 
 // Mouse-wheel zoom. The camera is orthographic, so zooming = scaling the
 // visible world height; resize() re-derives the frustum + render targets.
@@ -249,6 +251,11 @@ function onSettingChange(key) {
 function onAction(name) {
   if (currentMode.action) currentMode.action(name);
 }
+
+// demo hotkey: F fast-forwards the game to Day 30 (same as Settings → Demo)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "f" || e.key === "F") onAction("skipday30");
+});
 
 // Tree species picked in Settings → the active mode (game).
 function onSpecies(name) {

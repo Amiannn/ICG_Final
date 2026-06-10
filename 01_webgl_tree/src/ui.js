@@ -26,6 +26,9 @@ export function initUI(onChange, onAction, onMode, onSpecies) {
   initTimeSlider(onChange);
   initActions(onAction);
   initSettingsPanel(onChange);
+
+  // demo shortcut in Settings: fast-forward the game to the full-grown tree
+  $("#skip-day30")?.addEventListener("click", () => onAction?.("skipday30"));
   initModeButtons(onMode);
   initSpeciesButtons(onSpecies);
   initNotify();

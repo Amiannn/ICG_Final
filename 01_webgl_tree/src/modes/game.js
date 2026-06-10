@@ -30,17 +30,20 @@ export const gameMode = {
       const morph = makeMorphTree();
       morph.group.position.copy(ctx.tree ? ctx.tree.position : { x: 2.6, y: 0, z: 1.2 });
       ctx.scene.add(morph.group);
+      ctx.activeTreeGroup = morph.group; // poking interactions target this tree
       return {
         setGrowth: (g) => morph.setGrowth(g),
         dispose: () => {
           ctx.scene.remove(morph.group);
           morph.dispose();
           if (ctx.tree) ctx.tree.visible = true;
+          ctx.activeTreeGroup = ctx.tree;
         },
       };
     }
     // default: the real cedar, grown in place
     if (ctx.tree) ctx.tree.visible = true;
+    ctx.activeTreeGroup = ctx.tree;
     const cedar = makeCedarGrowth(ctx.tree, ctx.scene);
     return { setGrowth: (g) => cedar.setGrowth(g), dispose: () => cedar.dispose() };
   },
@@ -167,6 +170,14 @@ export const gameMode = {
       this.dayFloat += 1; // a drink = one day's growth
     } else if (name === "fertilize") this.dayFloat += 1;
     else if (name === "bonemeal") this.dayFloat += 2;
+    else if (name === "skipday30") {
+      // demo shortcut: jump straight to the fully-grown tree (mid-morning)
+      const target = game.growthDays - game.startDay + 0.45;
+      if (this.dayFloat < target) {
+        this.dayFloat = target;
+        notifyEvent("⏩", "Time flies — Day 30!");
+      }
+    }
   },
 
   // tap the pond → scoop a charge of water

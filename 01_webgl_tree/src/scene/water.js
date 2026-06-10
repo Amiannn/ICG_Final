@@ -13,10 +13,23 @@ import { makeWaterTexture } from "../textures.js";
 // slow swell used to perturb the reflection, B = sparkle) scrolled over time.
 // Edge fade softens where the plane meets the shore.
 
+// Irregular rim radius (relative, ~0.7–1.34) shared by the pond geometry, the
+// shore decoration in world.js (rimPoint) and the inside test (containsPoint).
+const rimR = (a) =>
+  1.0 +
+  0.18 * Math.sin(3 * a + 1.1) +
+  0.10 * Math.sin(5 * a + 2.3) +
+  0.06 * Math.sin(7 * a - 0.7);
+
+const MAX_TAPS = 8;
+
 export class Water {
   constructor({ width = 7, depth = 5, y = 0.06, center = new THREE.Vector3(-4, 0, -2) } = {}) {
     this.y = y;
     this.center = center.clone();
+    this.rx = width * 0.5;
+    this.rz = depth * 0.5;
+    this._tapIdx = 0;
 
     this.reflectionRT = new THREE.WebGLRenderTarget(4, 4, {
       minFilter: THREE.NearestFilter,
@@ -40,6 +53,9 @@ export class Water {
         uPlaneSize: { value: new THREE.Vector2(width, depth) },
         uRain: { value: 0 },
         uCenter: { value: new THREE.Vector2(center.x, center.z) },
+        uNight: { value: 0 }, // 0 day → 1 deep night (set from lighting.dayness)
+        // tap ripples: xy = world xz of the tap, z = tap time (uTime clock)
+        uTaps: { value: Array.from({ length: MAX_TAPS }, () => new THREE.Vector3(0, 0, -1e3)) },
       },
       vertexShader: /* glsl */ `
         attribute float aEdge;   // 1 at pond centre, 0 at the irregular rim
@@ -71,6 +87,28 @@ export class Water {
         uniform vec2 uPlaneSize;
         uniform float uRain;
         uniform vec2 uCenter;
+        uniform float uNight;
+        uniform vec3 uTaps[${MAX_TAPS}];
+
+        // player taps: an expanding crest ring + a trailing inner ring per tap,
+        // fading out as they spread (same idea as the rain rings, but one-shot,
+        // anchored at the tap point, and much bolder so a poke clearly answers)
+        float tapRipples(vec2 wpos, out float crest) {
+          crest = 0.0;
+          float total = 0.0;
+          for (int i = 0; i < ${MAX_TAPS}; i++) {
+            float age = uTime - uTaps[i].z;
+            if (age <= 0.0 || age >= 1.8) continue;
+            float fade = 1.0 - age / 1.8;
+            float d = length(wpos - uTaps[i].xy);
+            float R = age * 2.0;
+            float ring = smoothstep(0.26, 0.0, abs(d - R)) * fade;
+            float inner = smoothstep(0.2, 0.0, abs(d - max(0.0, R - 0.7))) * fade * 0.6;
+            crest += ring;
+            total += ring + inner;
+          }
+          return total;
+        }
 
         // a couple of expanding raindrop rings at pseudo-random spots on the pond
         float rainRipples(vec2 wpos, out float crest) {
@@ -104,33 +142,62 @@ export class Water {
           float lines = wave.r;
           float sparkle = wave.b;
 
+          // tap ripples are always live (the player poking the pond)
+          float tapCrest = 0.0;
+          float tapped = tapRipples(vWorld.xz, tapCrest);
+          swell = clamp(swell + tapped * 0.55, 0.0, 1.0);
+          float crest = tapCrest;
+
           // rain dimpling the pond: expanding rings perturb the swell + add crests
-          float crest = 0.0;
-          float ripple = 0.0;
           if (uRain > 0.5) {
-            ripple = rainRipples(vWorld.xz - uCenter, crest);
+            float rainCrest = 0.0;
+            float ripple = rainRipples(vWorld.xz - uCenter, rainCrest);
             swell = clamp(swell + ripple * 0.5, 0.0, 1.0);
+            crest += rainCrest;
           }
 
-          // base water colour: deep, with crisp crests lightening it
-          vec3 col = mix(uDeep, uShallow, 0.35 + swell * 0.4);
+          // depth grade: bright shallows hugging the shore, deeper colour toward
+          // the middle (vEdge is 0 at the rim, 1 at the pond centre)
+          float depthF = smoothstep(0.04, 0.6, vEdge);
+          vec3 col = mix(uShallow, uDeep, depthF * (0.78 - swell * 0.32));
           col = mix(col, uShallow, lines * 0.7);
           col += sparkle * 0.25;
 
-          // planar reflection sampled at screen uv, perturbed by the swell + ripples
+          // planar reflection sampled at screen uv, perturbed by the swell + ripples;
+          // deep water mirrors more than the bright shallows
           if (uReflectEnabled == 1) {
             vec2 screenUv = vScreen.xy / vScreen.w * 0.5 + 0.5;
             screenUv += (swell - 0.5) * 0.03;
             screenUv += crest * 0.02;
             vec3 refl = texture2D(tReflect, screenUv).rgb;
-            col = mix(col, refl, uReflectStrength * (0.62 + lines * 0.38));
+            col = mix(col, refl, uReflectStrength * (0.62 + lines * 0.38) * (0.45 + 0.55 * depthF));
           }
           col += crest * 0.18; // bright ripple crests catching the light
+          col += tapCrest * 0.24; // tap rings flash brighter than rain dimples
+
+          // shoreline: a crisp waterline plus patches of foam lapping just off
+          // the shore (drifting with the swell so the edge looks like it laps)
+          float shoreBand = 1.0 - smoothstep(0.0, 0.2, vEdge);
+          float lap = 0.5 + 0.5 * sin(uTime * 1.3 + vEdge * 26.0 + vWorld.x * 0.7 + vWorld.z * 0.9);
+          float foam = shoreBand * smoothstep(0.6, 0.78, swell * 0.55 + lap * 0.45);
+          foam += (1.0 - smoothstep(0.0, 0.05, vEdge)) * 0.8; // the waterline itself
+          foam = clamp(foam, 0.0, 1.0);
+          col = mix(col, vec3(0.93, 0.97, 0.9), foam * 0.8);
+
+          // night grade: the shader water doesn't receive scene lighting, so
+          // fade it to a deep moonlit blue ourselves (matching the meadow's
+          // moonlit-blue look) instead of staying sunlit white after dark
+          vec3 moonlit = col * vec3(0.26, 0.32, 0.52);
+          // ...with a soft moon-glade: a patch of pale light whose shimmer
+          // rides the wave lines and ripple crests
+          float glade = smoothstep(2.6, 0.0, length(vWorld.xz - uCenter - vec2(-0.9, -0.6)));
+          moonlit += glade * (lines * 0.38 + crest * 0.3 + swell * 0.07) * vec3(0.62, 0.68, 0.85);
+          col = mix(col, moonlit, uNight);
 
           // soften the shoreline using the per-vertex edge factor (0 at rim)
           float a = smoothstep(0.0, 0.28, vEdge) * 0.85 + 0.12;
 
-          gl_FragColor = vec4(col, clamp(a + lines * 0.25, 0.0, 1.0));
+          gl_FragColor = vec4(col, clamp(a + lines * 0.25 + foam * 0.4, 0.0, 1.0));
         }
       `,
     });
@@ -152,6 +219,32 @@ export class Water {
     );
     this._virtualCam = new THREE.OrthographicCamera();
     this._virtualCam.matrixWorldAutoUpdate = false;
+  }
+
+  // World-space point on the pond rim at angle `a`, scaled by `k` (k=1 is the
+  // waterline; k>1 walks outward onto the shore). The pond mesh is rotated
+  // -90° about x, which maps geometry +y to world -z.
+  rimPoint(a, k = 1) {
+    const r = rimR(a) * k;
+    return {
+      x: this.center.x + Math.cos(a) * r * this.rx,
+      z: this.center.z - Math.sin(a) * r * this.rz,
+    };
+  }
+
+  // Is the world-space point (x, z) inside the irregular pond outline?
+  containsPoint(x, z, k = 1) {
+    const ex = (x - this.center.x) / this.rx;
+    const ey = -(z - this.center.z) / this.rz;
+    return Math.hypot(ex, ey) <= rimR(Math.atan2(ey, ex)) * k;
+  }
+
+  // Start a one-shot tap ripple at the world-space point (x, z). Oldest slot
+  // is recycled; the ring animates entirely in the fragment shader.
+  addRipple(x, z) {
+    const u = this.material.uniforms;
+    u.uTaps.value[this._tapIdx].set(x, z, u.uTime.value);
+    this._tapIdx = (this._tapIdx + 1) % u.uTaps.value.length;
   }
 
   get bounds() {
@@ -222,11 +315,7 @@ function makePondGeometry(rx, rz, segments = 72) {
   const edges = [1];
   for (let i = 0; i < segments; i++) {
     const a = (i / segments) * Math.PI * 2;
-    const r =
-      1.0 +
-      0.18 * Math.sin(3 * a + 1.1) +
-      0.10 * Math.sin(5 * a + 2.3) +
-      0.06 * Math.sin(7 * a - 0.7);
+    const r = rimR(a);
     positions.push(Math.cos(a) * r * rx, Math.sin(a) * r * rz, 0);
     edges.push(0);
   }
