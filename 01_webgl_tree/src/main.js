@@ -147,8 +147,18 @@ canvas.addEventListener(
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(render);
 
+// Slow, ambient auto-orbit around the tree (paused while the user is dragging;
+// dragging just re-anchors it, so it carries on from wherever you let go).
+const AUTO_ORBIT_RATE = 0.022; // rad/s ≈ one lap every ~4.8 minutes
+let prevTime = 0;
+
 function render() {
   const time = clock.getElapsedTime();
+  const dt = Math.min(0.1, Math.max(0, time - prevTime));
+  prevTime = time;
+
+  if (settings.motion && !dragging) pixel.setYaw(pixel.yaw + AUTO_ORBIT_RATE * dt);
+
   currentMode.render(ctx, time);
   music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
   tickFps();
