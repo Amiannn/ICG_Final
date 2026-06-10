@@ -7,6 +7,7 @@ import { DustParticles } from "./effects/particles.js";
 import { makeRainSound } from "./effects/rainsound.js";
 import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
+import { makeFertilizeBurst } from "./effects/fertilize.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
@@ -40,6 +41,10 @@ const rainSplash = makeRainSplash();
 scene.add(rainSplash.mesh);
 const watering = makeWatering();
 scene.add(watering.group); // droplets + local ground ripples
+const fertBurst = makeFertilizeBurst();
+scene.add(fertBurst.points); // rising nutrient motes on Fertilize
+const emberBurst = makeFertilizeBurst({ count: 130, color: 0xffac4f });
+scene.add(emberBurst.points); // campfire flare when a visitor is... rendered
 
 // Audio can only start after a user gesture (browser autoplay policy), so kick
 // the ambient music off on the first interaction if it's enabled.
@@ -65,6 +70,8 @@ const ctx = {
   rainSplash,
   rainSound,
   watering,
+  fertBurst,
+  emberBurst,
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
@@ -166,6 +173,15 @@ const endDrag = (e, mayTap = false) => {
       }
     }
 
+    // then visiting animals (night roast → bone meal; day taps just hint)
+    if (currentMode.tryRoast) {
+      _tapRay.setFromCamera(_tapNdc.set(nx, ny), pixel.camera);
+      if (currentMode.tryRoast(_tapRay.ray)) {
+        window.__lastTap = "animal";
+        return;
+      }
+    }
+
     const hit = interact.tap(nx, ny, clock.getElapsedTime()); // ripple / tree shake
     window.__lastTap = hit; // dev hook
     // tapping the pond also scoops a water charge (game mode): the can
@@ -219,6 +235,8 @@ function render() {
 
   currentMode.render(ctx, time);
   watering.setTime(time); // animate the Water-action sprinkle burst
+  fertBurst.setTime(time); // animate the Fertilize nutrient motes
+  emberBurst.setTime(time); // animate the campfire roast flare
   music.setDayness(lighting.dayness); // daytime track: full by day, fades at night
   tickFps();
 }

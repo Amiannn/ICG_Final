@@ -242,8 +242,8 @@ export const compositeFragment = /* glsl */ `
     // fades smoothly through the cycle (1 = full night, 0 = day). Kept mild so the
     // bottom of the night reads as a moonlit blue, never a black-out.
     if (uNight > 0.001) {
-      vec3 cool = color * vec3(0.66, 0.72, 0.96);
-      color = mix(color, cool, 0.5 * clamp(uNight, 0.0, 1.0));
+      vec3 cool = color * vec3(0.74, 0.79, 0.98);
+      color = mix(color, cool, 0.38 * clamp(uNight, 0.0, 1.0));
     }
 
     // overcast grade when raining: greyer, cooler, a touch dimmer (no sunshine)

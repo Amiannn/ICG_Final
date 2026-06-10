@@ -16,6 +16,7 @@ export function buildWorld(scene) {
     flowerYellow: toonMaterial(0xf6d65a),
     flowerPink: toonMaterial(0xef9ab4),
     flowerWhite: toonMaterial(0xf2ead2),
+    flowerBlue: toonMaterial(0x7e9fe8),
   };
 
   // ground — huge so PT mode (which ignores scene.fog) never sees the edge.
@@ -34,6 +35,7 @@ export function buildWorld(scene) {
     [7, -8.5, 7, 1.5, 2.0],
     [11, -3, 5.5, 1.3, 1.7],
   ];
+  const hillMeshes = [];
   for (const [x, z, w, h, d] of hillPlacements) {
     const hill = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mats.hill);
     hill.position.set(x, h * 0.3, z);
@@ -42,6 +44,7 @@ export function buildWorld(scene) {
     hill.castShadow = true;
     hill.receiveShadow = true;
     scene.add(hill);
+    hillMeshes.push(hill);
   }
 
   // (the old far-horizon dodecahedron ring was replaced by the displaced
@@ -62,6 +65,7 @@ export function buildWorld(scene) {
     [8, 28, 8.0, 3.4, 5.2],
     [26, 15, 7.5, 3.2, 5.0],
   ];
+  const midHillMeshes = [];
   for (const [x, z, w, h, d] of midHills) {
     const hill = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mats.hill);
     hill.position.set(x, h * 0.3, z);
@@ -70,6 +74,7 @@ export function buildWorld(scene) {
     hill.castShadow = true;
     hill.receiveShadow = true;
     scene.add(hill);
+    midHillMeshes.push(hill);
   }
 
   // mountain ring — a displaced terrain mesh surrounding the meadow. Flat in
@@ -177,6 +182,7 @@ export function buildWorld(scene) {
     [-10, -6, 1.7], [-13, 5, 1.4], [9, -11, 1.6], [13, 6, 1.3],
     [-6, 10, 1.3], [12, -6, 1.5], [-11, -3, 1.5], [-2, 13.5, 1.2],
   ];
+  const bigRockMeshes = [];
   for (const [x, z, s] of bigRocks) {
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mats.rock);
     rock.position.set(x, s * 0.45, z);
@@ -185,6 +191,7 @@ export function buildWorld(scene) {
     rock.castShadow = true;
     rock.receiveShadow = true;
     scene.add(rock);
+    bigRockMeshes.push(rock);
   }
 
   // the tree
@@ -195,7 +202,7 @@ export function buildWorld(scene) {
   // scattered flowers (grouped so they can bloom in with the tree's growth)
   const flowers = new THREE.Group();
   const flowerList = [];
-  const blooms = [mats.flowerYellow, mats.flowerPink, mats.flowerWhite];
+  const blooms = [mats.flowerYellow, mats.flowerPink, mats.flowerWhite, mats.flowerBlue];
   const frand = mulberry(99);
   for (let i = 0; i < 95; i++) {
     const x = (frand() - 0.5) * 32;
@@ -209,44 +216,90 @@ export function buildWorld(scene) {
   }
 
   // grass tufts + a few wildflowers clinging to the rock tops and hill slopes,
-  // so the boulders + hills aren't bare. Tufts sit on each dome's upper surface.
+  // so the boulders + hills aren't bare. Each spot is RAY-DROPPED onto the
+  // actual faceted mesh (the polyhedra aren't the analytic dome their footprint
+  // suggests), so every tuft/flower sits flush on a real face — no floating.
   const vrng = mulberry(7777);
+  const _dropRay = new THREE.Raycaster();
+  const _dropFrom = new THREE.Vector3();
+  const _dropDir = new THREE.Vector3(0, -1, 0);
+  function dropOnto(mesh, x, z) {
+    _dropFrom.set(x, 60, z);
+    _dropRay.set(_dropFrom, _dropDir);
+    const hit = _dropRay.intersectObject(mesh, false);
+    return hit.length ? hit[0].point.y : null;
+  }
+
   const grassSpots = [];
-  const domeTufts = (cx, cy, cz, rx, ry, rz, n) => {
-    for (let i = 0; i < n; i++) {
-      const a = vrng() * Math.PI * 2;
-      const rad = Math.sqrt(vrng());
-      const dy = Math.sqrt(Math.max(0, 1 - rad * rad));
-      grassSpots.push({
-        x: cx + Math.cos(a) * rad * rx * 0.9,
-        z: cz + Math.sin(a) * rad * rz * 0.9,
-        y: cy + dy * ry,
-        w: 0.16 + vrng() * 0.12,
-        h: 0.22 + vrng() * 0.2,
-        t: vrng(),
-      });
+  // Carpet a faceted mesh in tufts: sample points directly ON its triangles
+  // (count ∝ world-space face area), so sloped SIDE faces get covered just as
+  // evenly as the tops — a vertical ray-drop can't reach those.
+  const _ta = new THREE.Vector3(), _tb = new THREE.Vector3(), _tc = new THREE.Vector3();
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _n = new THREE.Vector3();
+  const carpetTufts = (mesh, density) => {
+    mesh.updateMatrixWorld();
+    const geo = mesh.geometry;
+    const posA = geo.attributes.position;
+    const idx = geo.index;
+    const triCount = (idx ? idx.count : posA.count) / 3;
+    for (let t = 0; t < triCount; t++) {
+      const ia = idx ? idx.getX(t * 3) : t * 3;
+      const ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+      const ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      _ta.fromBufferAttribute(posA, ia).applyMatrix4(mesh.matrixWorld);
+      _tb.fromBufferAttribute(posA, ib).applyMatrix4(mesh.matrixWorld);
+      _tc.fromBufferAttribute(posA, ic).applyMatrix4(mesh.matrixWorld);
+      _e1.subVectors(_tb, _ta);
+      _e2.subVectors(_tc, _ta);
+      _n.crossVectors(_e1, _e2);
+      const area = _n.length() * 0.5;
+      if (_n.y < 0) continue; // underside faces stay bare
+      let want = Math.floor(area * density) + (vrng() < (area * density) % 1 ? 1 : 0);
+      while (want-- > 0) {
+        let u = vrng(), v = vrng();
+        if (u + v > 1) { u = 1 - u; v = 1 - v; }
+        const px = _ta.x + _e1.x * u + _e2.x * v;
+        const py = _ta.y + _e1.y * u + _e2.y * v;
+        const pz = _ta.z + _e1.z * u + _e2.z * v;
+        if (py < 0.06) continue; // skip the buried rim at ground level
+        grassSpots.push({
+          x: px, z: pz,
+          y: py - 0.04, // tuck the base into the face
+          w: 0.16 + vrng() * 0.12,
+          h: 0.22 + vrng() * 0.2,
+          t: vrng(),
+        });
+      }
     }
   };
-  for (const [x, z, s] of bigRocks) domeTufts(x, s * 0.45, z, s * 1.1, s * 0.6, s * 0.95, 10);
-  for (const [x, z, w, h, d] of hillPlacements) domeTufts(x, h * 0.3, z, w, h, d, 22);
-  for (const [x, z, w, h, d] of midHills) domeTufts(x, h * 0.3, z, w, h, d, 16);
+  // rocks keep just a few tufts in the cracks; the hills are carpeted all
+  // over — tops AND side slopes — like turf.
+  bigRockMeshes.forEach((m) => carpetTufts(m, 0.9));
+  hillMeshes.forEach((m) => carpetTufts(m, 10));
+  midHillMeshes.forEach((m) => carpetTufts(m, 6));
   const patchGrass = makePatchGrass(grassSpots);
   patchGrass.userData.noReflect = true;
   scene.add(patchGrass);
 
-  const perch = (cx, cy, cz, rx, ry, rz, n, k) => {
+  const perch = (mesh, cx, cz, rx, rz, n, k) => {
+    mesh.updateMatrixWorld();
     for (let i = 0; i < n; i++) {
       const a = vrng() * Math.PI * 2;
       const rad = Math.sqrt(vrng()) * 0.7;
-      const dy = Math.sqrt(Math.max(0, 1 - rad * rad));
-      const f = makeFlower(cx + Math.cos(a) * rad * rx, cz + Math.sin(a) * rad * rz, blooms[(k + i) % blooms.length], 0.6 + vrng() * 0.4, mats.grass);
-      f.position.y = cy + dy * ry;
+      const x = cx + Math.cos(a) * rad * rx;
+      const z = cz + Math.sin(a) * rad * rz;
+      const y = dropOnto(mesh, x, z);
+      if (y == null || y < 0.06) continue;
+      const f = makeFlower(x, z, blooms[(k + i) % blooms.length], 0.6 + vrng() * 0.4, mats.grass);
+      f.position.y = y - 0.02;
       flowers.add(f);
       flowerList.push(f);
     }
   };
-  bigRocks.forEach(([x, z, s], i) => perch(x, s * 0.45, z, s * 1.0, s * 0.55, s * 0.85, 2, i));
-  hillPlacements.forEach(([x, z, w, h, d], i) => perch(x, h * 0.3, z, w * 0.8, h, d * 0.8, 3, i));
+  bigRocks.forEach(([x, z, s], i) => perch(bigRockMeshes[i], x, z, s * 1.0, s * 0.85, 2, i));
+  // wildflowers dot the grassy hillsides (yellow / pink / white / blue)
+  hillPlacements.forEach(([x, z, w, , d], i) => perch(hillMeshes[i], x, z, w * 0.85, d * 0.85, 8, i));
+  midHills.forEach(([x, z, w, , d], i) => perch(midHillMeshes[i], x, z, w * 0.85, d * 0.85, 6, i + 2));
 
   scene.add(flowers);
 

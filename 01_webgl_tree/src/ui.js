@@ -174,6 +174,7 @@ function setResourceCount(action, badgeId, n) {
 }
 export const setWaterCount = (n) => setResourceCount("water", "water-count", n);
 export const setFertCount = (n) => setResourceCount("fertilize", "fert-count", n);
+export const setBoneCount = (n) => setResourceCount("bonemeal", "bone-count", n);
 
 // Pond-scoop animation: the watering can pops up at the tap point, dips to
 // scoop (with a ripple ring), then flies to the Water button. `onDone` fires
