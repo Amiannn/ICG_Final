@@ -13,7 +13,7 @@ export default defineConfig({
   base: "./",
   server: {
     host: "0.0.0.0",
-    port: 5173,
+    port: 3000,
     fs: {
       // allow reading files from the parent ICG_Final/ directory
       allow: [path.resolve(here, ".."), here],

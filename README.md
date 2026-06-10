@@ -55,7 +55,7 @@ The slider/sheet collapse with the grabber to reveal the full scene; the gear op
 ```bash
 cd 01_webgl_tree
 npm install
-npm run dev        # open http://localhost:5173 (already runs with --host for your LAN)
+npm run dev        # open http://localhost:3000 (already runs with --host for your LAN)
 ```
 
 Open the LAN URL on a phone for the full-screen portrait experience. Build a static
