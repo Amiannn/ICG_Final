@@ -29,6 +29,8 @@ export const realtimeMode = {
     // wind sways the grass + foliage across the whole scene (gustier in rain)
     windUniforms.uWindTime.value = time;
     windUniforms.uWindStrength.value = settings.rain ? 0.2 : 0.11;
+    // step the touch interactions (tree-shake wobble + falling leaves)
+    if (ctx.interact) ctx.interact.update(time);
 
     // time-of-day: an external driver (game mode's clock via ctx.tod) wins;
     // otherwise the built-in continuous cycle arcs the sun over ~30s.
@@ -48,6 +50,9 @@ export const realtimeMode = {
 
     world.water.setTime(time);
     world.water.material.uniforms.uReflectEnabled.value = settings.water ? 1 : 0;
+    // the pond darkens to moonlit blue after sunset (it gets no scene lighting);
+    // lighting.dayness tracks every time-of-day path (cycle, game clock, Night)
+    world.water.material.uniforms.uNight.value = 1 - lighting.dayness;
     dust.setTime(time);
     if (ctx.rainSplash) ctx.rainSplash.setTime(time); // animate rain-impact rings
 

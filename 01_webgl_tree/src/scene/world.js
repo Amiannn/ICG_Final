@@ -91,15 +91,54 @@ export function buildWorld(scene) {
   // bigger pond, grown toward the camera (+x/+z) so the cedar stays on the
   // back shore rather than ending up in the water. The back edge (toward the
   // tree) stays ~where it was; the lake just reaches further into the foreground.
-  const water = new Water({ width: 10, depth: 7.5, y: 0.06, center: new THREE.Vector3(6.0, 0, 4.4) });
+  // (moved to the cedar's lower-LEFT on screen, clear of the root flare, so
+  // the tree stands on its own bank and the pond sits above the bottom HUD)
+  const water = new Water({ width: 7, depth: 5, y: 0.06, center: new THREE.Vector3(4.4, 0, 6.8) });
   water.material.uniforms.uReflectStrength.value = 0.9;
   scene.add(water.mesh);
+
+  // pond shore — a sandy collar under the waterline plus stones ringing the
+  // rim, so the pond reads as dug into the meadow instead of laid on top.
+  const sandMat = toonMaterial(0xd6c692, { side: THREE.DoubleSide });
+  scene.add(makeShoreRing(water, sandMat));
+
+  const rockDark = toonMaterial(0x8e9184);
+  const rng3 = mulberry(606);
+  const campfireSpot = { x: 6.9, z: -0.5 }; // keep the shore clear of the campfire
+  const SHORE_STONES = 30;
+  for (let i = 0; i < SHORE_STONES; i++) {
+    const a = (i / SHORE_STONES) * Math.PI * 2 + (rng3() - 0.5) * 0.16;
+    if (rng3() < 0.3) continue; // leave gaps so the ring isn't a wall
+    const p = water.rimPoint(a, 1.05 + rng3() * 0.1);
+    if (Math.hypot(p.x - campfireSpot.x, p.z - campfireSpot.z) < 1.6) continue;
+    const s = 0.16 + rng3() * 0.26;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), rng3() < 0.5 ? mats.rock : rockDark);
+    rock.position.set(p.x, s * 0.32, p.z);
+    rock.scale.set(1.0 + rng3() * 0.5, 0.55 + rng3() * 0.3, 0.8 + rng3() * 0.4);
+    rock.rotation.set(rng3() * 0.5, rng3() * Math.PI * 2, (rng3() - 0.5) * 0.4);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    scene.add(rock);
+  }
+  // a few half-submerged stones breaking the waterline just inside the rim
+  for (let i = 0; i < 6; i++) {
+    const a = rng3() * Math.PI * 2;
+    const p = water.rimPoint(a, 0.78 + rng3() * 0.12);
+    const s = 0.16 + rng3() * 0.18;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), rockDark);
+    rock.position.set(p.x, s * 0.12, p.z); // mostly under the surface
+    rock.scale.set(1.0 + rng3() * 0.4, 0.6 + rng3() * 0.25, 0.85 + rng3() * 0.3);
+    rock.rotation.set(rng3() * 0.5, rng3() * Math.PI * 2, (rng3() - 0.5) * 0.4);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    scene.add(rock);
+  }
 
   // faceted rocks scattered around and ringing the scene (like the reference)
   const rockPlacements = [
     [-1.0, 3.2, 0.55], [-7.6, -1.4, 0.7], [-4.6, 1.0, 0.4], [2.4, -3.0, 0.6],
-    [5.6, 0.6, 0.75], [4.8, 3.4, 0.5], [-2.2, 5.2, 0.6], [1.0, 6.0, 0.7],
-    [-6.5, 3.8, 0.55], [6.8, -2.6, 0.65], [-3.4, -5.2, 0.7], [3.6, 5.6, 0.45],
+    [5.6, 0.6, 0.75], [4.8, 3.4, 0.5], [-2.2, 5.2, 0.6], [1.4, -7.8, 0.7],
+    [-6.5, 3.8, 0.55], [6.8, -2.6, 0.65], [-3.4, -5.2, 0.7], [9.6, 7.6, 0.45],
     [7.4, 2.8, 0.5], [-8.2, 1.6, 0.6], [0.4, -6.2, 0.55], [-5.6, -3.4, 0.5],
   ];
   const rng2 = mulberry(404);
@@ -117,9 +156,11 @@ export function buildWorld(scene) {
   // the cedar so the middle distance has some mass to read against the hills.
   // kept at radius < ~15 (clear foreground) so they never sit on the camera's
   // ~18-unit orbit and clip the view at any yaw
+  // ([6,12] used to sit right in front of the pond from the default iso view,
+  // clipping its front-left shore — kept as orbit-view mass, but off to the side)
   const bigRocks = [
     [-10, -6, 1.7], [-13, 5, 1.4], [9, -11, 1.6], [13, 6, 1.3],
-    [-6, 10, 1.3], [12, -6, 1.5], [-11, -3, 1.5], [6, 12, 1.2],
+    [-6, 10, 1.3], [12, -6, 1.5], [-11, -3, 1.5], [-2, 13.5, 1.2],
   ];
   for (const [x, z, s] of bigRocks) {
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mats.rock);
@@ -305,6 +346,35 @@ function makeMountainRing() {
 
   const mesh = new THREE.Mesh(geo, toonMaterial(0xffffff, { vertexColors: true }));
   mesh.receiveShadow = true;
+  return mesh;
+}
+
+// A flat sand collar following the pond's irregular rim. It sits just under
+// the translucent water edge (which fades out toward the rim), so the
+// shoreline reads as wet sand shading into the meadow.
+function makeShoreRing(water, mat, segments = 96) {
+  const pos = [];
+  const idx = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const outerK = 1.14 + 0.05 * Math.sin(a * 9.0 + 2.0) + 0.03 * Math.sin(a * 4.0);
+    const inner = water.rimPoint(a, 0.8);
+    const outer = water.rimPoint(a, outerK);
+    pos.push(inner.x, 0.03, inner.z, outer.x, 0.012, outer.z);
+  }
+  for (let i = 0; i < segments; i++) {
+    const b = i * 2;
+    idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  const normals = new Float32Array(pos.length);
+  for (let i = 1; i < normals.length; i += 3) normals[i] = 1; // all up
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  mesh.userData.noReflect = true;
   return mesh;
 }
 

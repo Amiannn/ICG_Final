@@ -51,13 +51,16 @@
           </div>
         </div>
 
-        <!-- bottom cluster: notification + time slider + action sheet -->
+        <!-- event notification: floats under the top bar so it never covers
+             the pond / interactive scenery at the bottom of the stage -->
+        <button class="notify hidden" id="notify">
+          <span class="notify-icon" id="notify-icon">🦌</span>
+          <span class="notify-text" id="notify-text">A little deer visited!</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </button>
+
+        <!-- bottom cluster: time slider + action sheet -->
         <div class="bottom-cluster">
-          <button class="notify hidden" id="notify">
-            <span class="notify-icon" id="notify-icon">🦌</span>
-            <span class="notify-text" id="notify-text">A little deer visited!</span>
-            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-          </button>
 
           <!-- time-of-day slider -->
           <div class="time-slider" id="time-slider">
@@ -160,6 +163,11 @@
                 <button class="opt mode-opt" data-mode="realtime">Real-time</button>
                 <button class="opt mode-opt" data-mode="growth">Growth</button>
                 <button class="opt mode-opt" data-mode="growthmorph">Morph</button>
+              </div>
+
+              <div class="modal-section-title" style="margin-top: 22px">Demo</div>
+              <div class="opt-grid">
+                <button class="opt" id="skip-day30">⏩ Skip to Day 30</button>
               </div>
 
               <div class="opt-row stat-row">

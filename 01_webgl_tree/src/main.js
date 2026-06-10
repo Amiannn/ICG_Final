@@ -9,6 +9,7 @@ import { makeAmbientMusic } from "./effects/ambient.js";
 import { makeWatering } from "./effects/watering.js";
 import { makeRainSplash } from "./effects/rainsplash.js";
 import { makeFireworks } from "./effects/fireworks.js";
+import { makeInteractions } from "./effects/interact.js";
 import { Pipeline } from "./pipeline.js";
 import { initUI, tickFps } from "./ui.js";
 import { realtimeMode } from "./modes/realtime.js";
@@ -79,7 +80,14 @@ const ctx = {
   pipeline,
   settings,
   tod: null, // game mode drives this; null = use each mode's own time-of-day
+  activeTreeGroup: world.tree, // whichever tree the player can poke (game mode swaps it)
 };
+
+// touch interactions: tap the pond/tree, flick for a wind gust
+const interact = makeInteractions(ctx);
+ctx.interact = interact;
+scene.add(interact.leaves);
+window.__interact = interact; // dev hook (like __mode / __tod)
 
 // One place to switch rain on/off with all its effects (lighting overcast,
 // ambience, pond ripples, ground splash, screen streaks). Game weather + the
@@ -116,33 +124,51 @@ window.addEventListener("resize", resize);
 new ResizeObserver(resize).observe(canvas);
 resize();
 
-// Horizontal mouse-drag yaw. Click + drag left/right on the canvas to orbit
-// the camera around the cedar; vertical motion is intentionally ignored.
+// Pointer gestures on the canvas:
+//   • drag left/right — orbit (yaw) around the cedar (vertical motion ignored)
+//   • a tap           — poke the scene (pond ripple / tree shake), see interact.js
 canvas.style.cursor = "grab";
 let dragging = false;
 let lastX = 0;
+let lastY = 0;
+let moved = 0; // accumulated pointer travel (px) to tell taps from drags
 const YAW_SENSITIVITY = 0.005; // rad per pixel of horizontal motion
+const TAP_SLOP_PX = 8;
+const TAP_MAX_MS = 350;
+let downT = 0;
 canvas.addEventListener("pointerdown", (e) => {
   dragging = true;
   lastX = e.clientX;
+  lastY = e.clientY;
+  downT = performance.now();
+  moved = 0;
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
 });
 canvas.addEventListener("pointermove", (e) => {
   if (!dragging) return;
   const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
   lastX = e.clientX;
+  lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(dy);
   pixel.setYaw(pixel.yaw - dx * YAW_SENSITIVITY);
 });
-const endDrag = (e) => {
+const endDrag = (e, mayTap = false) => {
   if (!dragging) return;
   dragging = false;
   if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
     canvas.releasePointerCapture(e.pointerId);
   }
   canvas.style.cursor = "grab";
+  if (mayTap && moved < TAP_SLOP_PX && performance.now() - downT < TAP_MAX_MS) {
+    const r = canvas.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    const ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
+    window.__lastTap = interact.tap(nx, ny, clock.getElapsedTime()); // dev hook
+  }
 };
-canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointerup", (e) => endDrag(e, true));
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("pointerleave", endDrag);
 
@@ -231,6 +257,11 @@ function onSettingChange(key) {
 function onAction(name) {
   if (currentMode.action) currentMode.action(name);
 }
+
+// demo hotkey: F fast-forwards the game to Day 30 (same as Settings → Demo)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "f" || e.key === "F") onAction("skipday30");
+});
 
 // Tree species picked in Settings → the active mode (game).
 function onSpecies(name) {
