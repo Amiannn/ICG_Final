@@ -146,6 +146,22 @@ function navBlocked(x, z, list) {
   return false;
 }
 
+// spiral out to the nearest spot clear of every push field — the escape hatch
+// for a body wedged into a concave pocket where two overlapping obstacle
+// circles (e.g. the pavilion + its shore rocks) cancel every step it takes
+function nearestFreeXZ(x, z, list) {
+  if (!navBlocked(x, z, list)) return [x, z];
+  for (let r = 0.4; r <= 6; r += 0.4) {
+    const n = Math.max(8, Math.round(r * 14));
+    for (let k = 0; k < n; k++) {
+      const ang = (k / n) * Math.PI * 2;
+      const nx = x + Math.cos(ang) * r, nz = z + Math.sin(ang) * r;
+      if (!navBlocked(nx, nz, list)) return [nx, nz];
+    }
+  }
+  return [x, z];
+}
+
 function findPath(sx, sz, tx, tz, list) {
   const W = Math.round((NAV.x1 - NAV.x0) / NAV.cell);
   const H = Math.round((NAV.z1 - NAV.z0) / NAV.cell);
@@ -605,9 +621,24 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
   function sendToFire(a, fx, fz) {
     a.state = "tofire";
     a.fire = [fx, fz];
-    // route IGNORING the campfire's own obstacle so it walks right INTO the
-    // flames (not to the rim), then roasts at the centre
-    const list = OBSTACLES.filter((o) => Math.hypot((o.x || 0) - fx, (o.z || 0) - fz) > 1.2);
+    // arrival = body at the stone ring (visual ring r≈0.55, stones to ~0.75),
+    // nose poking into the flames — NOT the route's centre target, which the
+    // walk's 0.2 arrive-threshold would chase right into the flame cone
+    a.fireR = 0.9;
+    // route IGNORING the campfire's own obstacle so the path aims straight at
+    // the flames (the per-frame guarantee also skips the campfire for this
+    // animal — see update() — otherwise it would shove it back out every step).
+    // The fire's doorstep is crowded: nearby rocks' push fields (footprint +
+    // body margin) intrude into the arrival ring, so any circle reaching the
+    // doorstep keeps only its visual core — the doomed walk can squeeze right
+    // past a rock without clipping into it. The pond ellipse stays untouched
+    // (never wade), and routing still avoids everything else as usual.
+    const list = OBSTACLES
+      .filter((o) => Math.hypot((o.x || 0) - fx, (o.z || 0) - fz) > 1.2)
+      .map((o) => {
+        if (o.rx || Math.hypot(o.x - fx, o.z - fz) - o.r > a.fireR + 0.4) return o;
+        return { ...o, r: Math.max(0.4, o.r - 0.6) }; // strip the body margin
+      });
     planTo(a, fx, fz, list);
   }
 
@@ -642,7 +673,8 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
     a.routeList = list;
     a.route = findPath(a.group.position.x, a.group.position.z, tx, tz, list) || [a.goal];
     a.wp = 0;
-    a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
+    a.stuckT = 0; a.stuckN = 0;
+    a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
   }
 
   // follow the current route; returns true when the FINAL goal is reached
@@ -656,12 +688,24 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
       a.wp++;
     }
     // watchdog: no real progress for ~1.2s (shoved by a neighbour, wedged on a
-    // rim, anything) → re-plan from where it stands; it can always route out
+    // rim, anything) → re-plan from where it stands. If a replan didn't free
+    // it either, it is WEDGED in a concave pocket between overlapping push
+    // fields (pavilion + shore rocks) where every step cancels — hop straight
+    // to the nearest clear spot (a fraction of a body-length) and route on.
     a.stuckT += dt;
     if (a.stuckT > 1.2) {
       if (Math.hypot(a.group.position.x - a.lastPX, a.group.position.z - a.lastPZ) < 0.25) {
+        a.stuckN = (a.stuckN || 0) + 1;
+        if (a.stuckN >= 2) {
+          const [ex, ez] = nearestFreeXZ(a.group.position.x, a.group.position.z, list);
+          a.group.position.x = ex;
+          a.group.position.z = ez;
+          a.stuckN = 0;
+        }
         a.route = findPath(a.group.position.x, a.group.position.z, a.goal.x, a.goal.z, list) || [a.goal];
         a.wp = 0;
+      } else {
+        a.stuckN = 0;
       }
       a.stuckT = 0; a.lastPX = a.group.position.x; a.lastPZ = a.group.position.z;
     }
@@ -851,14 +895,20 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
           a.group.visible = false;
         }
       } else if (a.state === "tofire") {
-        // marching to the campfire (rain doesn't save it now)
-        if (followRoute(a, dt, t)) {
+        // marching to the campfire (rain doesn't save it now). Arrived once
+        // the body reaches the stone ring — close enough that the muzzle is
+        // over the flames when it keels in
+        const atRim = Math.hypot(
+          a.group.position.x - a.fire[0],
+          a.group.position.z - a.fire[1],
+        ) <= (a.fireR || 0.9);
+        if (followRoute(a, dt, t) || atRim) {
           a.state = "roast";
           a.roastT = 0;
           api.onRoastStart?.(a.type); // fire flares (ember burst)
         }
       } else if (a.state === "roast") {
-        // (keels over at the legal standoff beside the flames — never in them)
+        // (keels over right at the stone ring, muzzle in the flames)
         // cartoon send-off: keel over with a little hop, then shrink away
         a.roastT += dt;
         const TIP = 0.55, GONE = 1.6;
@@ -885,11 +935,14 @@ export function makeAnimals(obstacles = [], majorObstacles = obstacles) {
 
     // final guarantee, every frame: no visible animal — whatever its state —
     // ever rests inside an obstacle's clearance (grazing beside the trunk,
-    // keeling over at the fire, anything)
+    // anything). EXCEPT the march to the fire: those resolve against their
+    // route list (campfire filtered out), or the push-out would hold them at
+    // the obstacle rim a full body-length away from the flames forever.
     for (const a of anims) {
       if (!a.group.visible) continue;
       const p = a.group.position;
-      [p.x, p.z] = resolveXZ(p.x, p.z);
+      const atFire = a.state === "tofire" || a.state === "roast";
+      [p.x, p.z] = resolveXZ(p.x, p.z, atFire ? a.routeList || OBSTACLES : OBSTACLES);
     }
   }
 
